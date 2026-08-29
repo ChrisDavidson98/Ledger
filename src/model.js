@@ -320,24 +320,77 @@ export function teeOutcomes(rounds, baseline = 'tour') {
   };
 }
 
-/** Greens in regulation: on the putting surface in par minus two. */
+/**
+ * Greens in regulation: on the putting surface in par minus two —
+ * a par 3 in one, a par 4 in two, a par 5 in three.
+ *
+ * Also split by par, because the blended number hides a lot. Par 5s
+ * demand a green in three and drag the total down; par 3s only ask
+ * for one swing. Which of the three is weak is the useful question.
+ */
 export function greensInRegulation(rounds) {
   let greens = 0;
   let holes = 0;
+  const byPar = {};
 
   rounds.forEach((round) => {
     playedHoles(round).forEach((hole) => {
+      const par = hole.par;
+      if (!byPar[par]) byPar[par] = { par, greens: 0, holes: 0, pct: 0 };
       holes += 1;
-      const allowed = hole.par - 2;
+      byPar[par].holes += 1;
+
+      const allowed = par - 2;
       const shot = hole.shots[allowed - 1];
-      if (!shot) return;
-      // Holing out counts, and so does being on the green in regulation.
-      if (shot.holed || shot.endLie === 'green') greens += 1;
-      else if (hole.shots.slice(0, allowed).some((s) => s.holed)) greens += 1;
+      let hit = false;
+      if (shot) {
+        // Holing out counts, and so does being on the green in regulation.
+        if (shot.holed || shot.endLie === 'green') hit = true;
+        else if (hole.shots.slice(0, allowed).some((s) => s.holed)) hit = true;
+      }
+      if (hit) {
+        greens += 1;
+        byPar[par].greens += 1;
+      }
     });
   });
 
-  return { greens, holes, pct: holes ? Math.round((greens / holes) * 100) : 0 };
+  Object.values(byPar).forEach((row) => {
+    row.pct = row.holes ? Math.round((row.greens / row.holes) * 100) : 0;
+  });
+
+  return {
+    greens,
+    holes,
+    pct: holes ? Math.round((greens / holes) * 100) : 0,
+    byPar: Object.values(byPar).sort((a, b) => a.par - b.par),
+  };
+}
+
+/**
+ * One point per round, oldest first, normalised per 18 holes so a
+ * weekday nine sits on the same scale as a full round.
+ */
+export function trendSeries(rounds, baseline = 'tour') {
+  return rounds
+    .slice()
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .map((round) => {
+      const holes = playedHoles(round).length || 1;
+      const totals = roundTotals(round, baseline);
+      const scale = 18 / holes;
+      const point = {
+        id: round.id,
+        date: round.date,
+        courseName: round.courseName,
+        holes,
+        score: roundScore(round),
+        toPar: roundToPar(round),
+        total: totals.total * scale,
+      };
+      CATEGORIES.forEach((c) => { point[c] = totals[c] * scale; });
+      return point;
+    });
 }
 
 /**

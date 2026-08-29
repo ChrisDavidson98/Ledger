@@ -39,6 +39,7 @@ import {
   puttingBuckets,
   teeOutcomes,
   greensInRegulation,
+  trendSeries,
   missTally,
 } from './model.js';
 
@@ -90,6 +91,7 @@ const STATE = {
   historyScope: 'mine',
   holePicker: false,
   openHole: null,
+  trendKey: 'total',
   editShotIdx: null,
   syncBusy: false,
   syncStatus: null,
@@ -926,6 +928,8 @@ function screenStats() {
       <p class="tiny">The handicap conversion is a model, not a measurement. It is anchored on scoring, which is solid; the split between categories is approximate. Good for spotting the weak spot, not for arguing over a decimal.</p>
     </div>
 
+    ${renderTrendCard(trendSeries(rounds))}
+
     <div class="card">
       <h2>The basics</h2>
       <div class="stat-grid g4">
@@ -934,6 +938,18 @@ function screenStats() {
         <div class="stat-box"><div class="val">${(rounds.reduce((s, r) => s + roundScore(r), 0) / rounds.length).toFixed(1)}</div><div class="lbl">Avg score</div></div>
         <div class="stat-box"><div class="val">${(putts.reduce((s, b) => s + b.putts, 0) / holesPlayed * 18).toFixed(1)}</div><div class="lbl">Putts/18</div></div>
       </div>
+      ${gir.byPar.length > 1 ? `
+        <label>Greens in regulation by par</label>
+        <div class="stat-grid" style="grid-template-columns:repeat(${gir.byPar.length},1fr)">
+          ${gir.byPar.map((row) => `
+            <div class="stat-box">
+              <div class="val" style="font-size:17px">${row.pct}%</div>
+              <div class="lbl">Par ${row.par}</div>
+              <div class="tiny">${row.greens}/${row.holes}</div>
+            </div>`).join('')}
+        </div>
+        <p class="tiny" style="margin-top:6px">A par 5 green in regulation means on in three, so that column is always the hardest. Compare each against itself over time rather than against the others.</p>
+      ` : ''}
     </div>
 
     ${renderTeeCard(tee)}
@@ -1015,6 +1031,105 @@ function renderComparison() {
     </div>
     <p class="tiny" style="margin-top:8px">Everyone is measured against the same tour baseline, so these compare directly even off different tees.</p>
   </div>`;
+}
+
+/**
+ * Strokes gained per 18, one point per round, oldest to newest.
+ *
+ * Drawn as inline SVG rather than pulling in a charting library: it
+ * is one line and a zero rule, it inherits the theme through CSS
+ * variables, and it keeps the app dependency-free and offline.
+ */
+function renderTrendCard(series) {
+  if (series.length < 2) {
+    return series.length === 1 ? `<div class="card">
+      <h2>Trend</h2>
+      <p class="muted">One round in. A second will start the line.</p>
+    </div>` : '';
+  }
+
+  const key = STATE.trendKey || 'total';
+  const values = series.map((p) => p[key]);
+  const W = 320;
+  const H = 132;
+  const padL = 30;
+  const padR = 8;
+  const padT = 12;
+  const padB = 22;
+
+  let min = Math.min(...values, 0);
+  let max = Math.max(...values, 0);
+  if (max - min < 1) { min -= 0.5; max += 0.5; } // keep a flat line off the axis
+  const pad = (max - min) * 0.12;
+  min -= pad;
+  max += pad;
+
+  const x = (i) => padL + (i / (series.length - 1)) * (W - padL - padR);
+  const y = (v) => padT + (1 - (v - min) / (max - min)) * (H - padT - padB);
+
+  const line = series.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(' ');
+  const area = `${line} L${x(series.length - 1).toFixed(1)},${y(min).toFixed(1)} L${x(0).toFixed(1)},${y(min).toFixed(1)} Z`;
+  const zeroY = y(0).toFixed(1);
+
+  const first = values[0];
+  const last = values[values.length - 1];
+  const change = last - first;
+  const best = Math.max(...values);
+
+  return `<div class="card">
+    <div class="split">
+      <h2>Trend</h2>
+      <span class="tiny">${series.length} rounds</span>
+    </div>
+    <div class="chip-grid" style="grid-template-columns:repeat(5,1fr);gap:6px">
+      ${[['total', 'Total'], ...CATEGORIES.map((c) => [c, CATEGORY_SHORT[c]])].map(([k, label]) => `
+        <button class="chip ${key === k ? 'active' : ''}" data-trend="${k}"
+                style="padding:7px 0;font-size:12px;min-height:38px">${label}</button>
+      `).join('')}
+    </div>
+
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;margin-top:6px"
+         role="img" aria-label="Strokes gained per 18 holes by round">
+      <path d="${area}" fill="var(--green-mid)" opacity="0.12"></path>
+      <line x1="${padL}" y1="${zeroY}" x2="${W - padR}" y2="${zeroY}"
+            stroke="var(--green-line)" stroke-width="1" stroke-dasharray="3 3"></line>
+      <text x="${padL - 4}" y="${zeroY}" text-anchor="end" dominant-baseline="middle"
+            font-size="9" fill="var(--ink-faint)" font-family="IBM Plex Mono, monospace">0</text>
+      ${/* Skip an end label that would sit on top of the zero rule. */ ''}
+      ${Math.abs(y(max) - y(0)) > 11 ? `<text x="${padL - 4}" y="${padT + 4}" text-anchor="end"
+            font-size="9" fill="var(--ink-faint)" font-family="IBM Plex Mono, monospace">${max.toFixed(0)}</text>` : ''}
+      ${Math.abs(y(min) - y(0)) > 11 ? `<text x="${padL - 4}" y="${H - padB}" text-anchor="end"
+            font-size="9" fill="var(--ink-faint)" font-family="IBM Plex Mono, monospace">${min.toFixed(0)}</text>` : ''}
+      <path d="${line}" fill="none" stroke="var(--flag)" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round"></path>
+      ${series.map((p, i) => `
+        <circle cx="${x(i).toFixed(1)}" cy="${y(p[key]).toFixed(1)}" r="3.5"
+                fill="var(--paper)" stroke="var(--flag)" stroke-width="2"></circle>
+      `).join('')}
+      <text x="${padL}" y="${H - 6}" font-size="9" fill="var(--ink-faint)">${fmtShortDate(series[0].date)}</text>
+      <text x="${W - padR}" y="${H - 6}" text-anchor="end" font-size="9" fill="var(--ink-faint)">${fmtShortDate(series[series.length - 1].date)}</text>
+    </svg>
+
+    <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stat-box">
+        <div class="val ${sgClass(last)}" style="font-size:16px">${fmtSG(last)}</div>
+        <div class="lbl">Latest</div>
+      </div>
+      <div class="stat-box">
+        <div class="val ${sgClass(best)}" style="font-size:16px">${fmtSG(best)}</div>
+        <div class="lbl">Best</div>
+      </div>
+      <div class="stat-box">
+        <div class="val ${sgClass(change)}" style="font-size:16px">${fmtSG(change)}</div>
+        <div class="lbl">Since first</div>
+      </div>
+    </div>
+    <p class="tiny" style="margin-top:8px">Per 18 holes, so nines sit on the same scale. Higher is better; the dashed line is tour average.</p>
+  </div>`;
+}
+
+function fmtShortDate(iso) {
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 /* --- Shared stat cards -------------------------------------------
@@ -1985,7 +2100,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-set-theme],[data-presets],[data-open-hole]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-set-theme],[data-presets],[data-open-hole],[data-trend]');
   if (!target) return;
 
   const verified = target.getAttribute('data-verified');
@@ -1993,6 +2108,9 @@ function onClick(event) {
     STATE.courseDraft.verified = verified === 'yes';
     return render();
   }
+
+  const trend = target.getAttribute('data-trend');
+  if (trend) { STATE.trendKey = trend; return render(); }
 
   const openHole = target.getAttribute('data-open-hole');
   if (openHole !== null) {
