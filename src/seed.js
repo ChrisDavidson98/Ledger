@@ -41,6 +41,58 @@ export const SEED_COURSES = [
       { id: 'seed_gardner_18', name: 'Full 18', nineIds: ['seed_gardner_main', 'seed_gardner_main'] },
     ],
   },
+
+  {
+    id: 'seed_standrews',
+    name: 'St. Andrews Golf Club',
+    city: 'Overland Park, KS',
+    // Gold is on the card but nobody here plays it.
+    teeNames: ['Black', 'Blue', 'White'],
+    verified: true,
+    source: 'scorecard',
+    nines: [
+      {
+        id: 'seed_standrews_front',
+        name: 'Front',
+        holes: [
+          { hole: 1, par: 5, yards: { Black: 560, Blue: 518, White: 484 } },
+          { hole: 2, par: 4, yards: { Black: 354, Blue: 332, White: 310 } },
+          { hole: 3, par: 4, yards: { Black: 343, Blue: 313, White: 313 } },
+          { hole: 4, par: 3, yards: { Black: 161, Blue: 155, White: 137 } },
+          { hole: 5, par: 4, yards: { Black: 330, Blue: 323, White: 312 } },
+          { hole: 6, par: 3, yards: { Black: 178, Blue: 158, White: 128 } },
+          { hole: 7, par: 5, yards: { Black: 524, Blue: 503, White: 483 } },
+          { hole: 8, par: 4, yards: { Black: 384, Blue: 373, White: 343 } },
+          { hole: 9, par: 4, yards: { Black: 386, Blue: 368, White: 343 } },
+        ],
+      },
+      {
+        // Numbered 10-18 the way the card reads, so a shot logged on
+        // the 13th says so rather than calling it the 4th.
+        id: 'seed_standrews_back',
+        name: 'Back',
+        holes: [
+          { hole: 10, par: 5, yards: { Black: 577, Blue: 541, White: 517 } },
+          { hole: 11, par: 4, yards: { Black: 384, Blue: 358, White: 311 } },
+          { hole: 12, par: 3, yards: { Black: 168, Blue: 155, White: 144 } },
+          { hole: 13, par: 4, yards: { Black: 328, Blue: 304, White: 284 } },
+          // 14 really is 158 from both Blue and White — checked twice.
+          { hole: 14, par: 3, yards: { Black: 178, Blue: 158, White: 158 } },
+          { hole: 15, par: 5, yards: { Black: 498, Blue: 474, White: 444 } },
+          { hole: 16, par: 4, yards: { Black: 419, Blue: 391, White: 365 } },
+          { hole: 17, par: 3, yards: { Black: 193, Blue: 174, White: 150 } },
+          { hole: 18, par: 4, yards: { Black: 397, Blue: 388, White: 372 } },
+        ],
+      },
+    ],
+    combos: [
+      {
+        id: 'seed_standrews_18',
+        name: 'Front / Back',
+        nineIds: ['seed_standrews_front', 'seed_standrews_back'],
+      },
+    ],
+  },
 ];
 
 /** Seed courses not already present, matched on id. */
