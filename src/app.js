@@ -39,6 +39,7 @@ import {
 } from './model.js';
 
 import * as store from './storage.js';
+import * as sync from './sync.js';
 
 import {
   newCourse,
@@ -63,6 +64,9 @@ const STATE = {
   courseTeeIdx: 0,
   setupCourseId: null, // course chosen, awaiting a tee
   viewRoundId: null,
+  historyScope: 'mine',
+  syncBusy: false,
+  syncStatus: null,
   notice: null,
   error: null,
 };
@@ -131,7 +135,7 @@ const NAV = [
 
 const NAV_GROUPS = {
   home: ['home', 'setup', 'play', 'summary'],
-  history: ['history', 'detail'],
+  history: ['history', 'detail', 'settings'],
   stats: ['stats'],
   courses: ['courses', 'courseEdit'],
 };
@@ -446,31 +450,102 @@ function roundReport(round) {
 }
 
 function screenHistory() {
-  const rounds = playerRounds();
+  const everyone = STATE.historyScope === 'all';
+  const rounds = everyone ? store.getRounds() : playerRounds();
+  const pending = store.unsynced().length;
+
   return `${topbar(`${STATE.player} · Rounds`)}
     ${notices()}
     <div class="card">
-      <h2>Rounds</h2>
+      <div class="chip-grid g2">
+        <button class="chip ${everyone ? '' : 'active'}" data-scope="mine">Mine</button>
+        <button class="chip ${everyone ? 'active' : ''}" data-scope="all">Everyone</button>
+      </div>
       ${rounds.length === 0 ? `
         <div class="empty">
           <div class="glyph">&#9971;</div>
-          <div>No rounds logged yet.</div>
+          <div>${everyone ? 'No rounds on this device yet.' : 'No rounds logged yet.'}</div>
         </div>` : rounds.map((r) => `
         <button class="row" data-action="view-round" data-id="${esc(r.id)}">
           <div class="badge">${fmtToPar(roundToPar(r))}</div>
           <div class="row-meta">
-            <div class="rname">${esc(r.courseName)}</div>
+            <div class="rname">${esc(r.courseName)}${everyone ? ` <span class="tiny">${esc(r.player)}</span>` : ''}</div>
             <div class="rsub">${fmtDate(r.date)} &middot; ${esc(r.teeName)} &middot; ${roundScore(r)} strokes</div>
           </div>
           <div class="row-val ${sgClass(roundTotals(r).total)}">${fmtSG(roundTotals(r).total)}</div>
         </button>`).join('')}
     </div>
-    ${rounds.length ? `
-      <div class="card">
-        <h2>Backup</h2>
-        <p class="muted">Everything lives on this phone until the shared backend lands. Save a copy somewhere safe.</p>
-        <button class="btn-ghost" data-action="export">Export All Data</button>
-      </div>` : ''}`;
+
+    <div class="card">
+      <div class="split">
+        <h2>Sync</h2>
+        <span class="tiny">${sync.isConfigured() ? 'connected to sheet' : 'not set up'}</span>
+      </div>
+      <p class="muted">
+        ${sync.isConfigured()
+          ? (pending
+            ? `${pending} round${pending === 1 ? '' : 's'} waiting to upload.`
+            : 'Everything on this device is on the sheet.')
+          : 'Rounds are saved on this phone only. Connect a Google Sheet to share them.'}
+      </p>
+      ${STATE.syncStatus ? `<div class="${STATE.syncStatus.bad ? 'err-box' : 'ok-box'}">${esc(STATE.syncStatus.text)}</div>` : ''}
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="goto-settings">Settings</button>
+        <button class="btn-primary" data-action="sync-now" ${sync.isConfigured() && !STATE.syncBusy ? '' : 'disabled'}>
+          ${STATE.syncBusy ? 'Syncing…' : 'Sync Now'}
+        </button>
+      </div>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="export">Export Backup</button>
+      </div>
+    </div>`;
+}
+
+function screenSettings() {
+  const config = sync.getConfig();
+  const pending = store.unsynced().length;
+
+  return `${topbar('Settings')}
+    ${notices()}
+    <div class="card">
+      <h2>Google Sheet backend</h2>
+      <p class="muted">Paste the Web App URL from your Apps Script deployment and the shared secret you set on it. Setup steps are in <span class="mono">apps-script/README.md</span>.</p>
+
+      <label>Web App URL</label>
+      <input type="text" id="syncUrl" value="${esc(config.url)}" placeholder="https://script.google.com/macros/s/.../exec" autocapitalize="off" autocorrect="off" spellcheck="false">
+
+      <label>Shared secret</label>
+      <input type="password" id="syncSecret" value="${esc(config.secret)}" placeholder="the value of LEDGER_SECRET" autocapitalize="off" autocorrect="off" spellcheck="false">
+
+      <p class="tiny">This is stored on this device only, never in the repo. It stops strangers who find the URL from reading or writing your rounds. It does not stop each other &mdash; anyone with it can post as any player.</p>
+
+      <button class="btn-primary" style="margin-top:8px" data-action="save-sync-config">Save</button>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="test-sync" ${STATE.syncBusy ? 'disabled' : ''}>Test Connection</button>
+        <button class="btn-ghost" data-action="setup-sheets" ${STATE.syncBusy ? 'disabled' : ''}>Create Tabs</button>
+      </div>
+      ${STATE.syncStatus ? `<div class="${STATE.syncStatus.bad ? 'err-box' : 'ok-box'}">${esc(STATE.syncStatus.text)}</div>` : ''}
+    </div>
+
+    <div class="card">
+      <h2>This device</h2>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="val">${store.getRounds().length}</div><div class="lbl">Rounds</div></div>
+        <div class="stat-box"><div class="val">${pending}</div><div class="lbl">Unsynced</div></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="full-pull" ${sync.isConfigured() && !STATE.syncBusy ? '' : 'disabled'}>Pull Everything</button>
+      </div>
+      <p class="tiny">Pull Everything re-reads the whole sheet, rather than only what changed since the last sync. Use it on a new phone.</p>
+    </div>
+
+    <div class="card">
+      <h2>Player</h2>
+      <p class="muted">Signed in as ${esc(STATE.player)}.</p>
+      <button class="btn-ghost" data-action="sign-out">Switch Player</button>
+    </div>
+
+    <button class="btn-ghost" data-action="goto-history">&larr; Back</button>`;
 }
 
 function screenDetail() {
@@ -654,6 +729,7 @@ const SCREENS = {
   summary: screenSummary,
   history: screenHistory,
   detail: screenDetail,
+  settings: screenSettings,
   stats: screenStats,
   courses: screenCourses,
   courseEdit: screenCourseEdit,
@@ -699,12 +775,26 @@ function bindLiveInputs() {
     };
   }
 
+  const syncUrl = document.getElementById('syncUrl');
+  if (syncUrl) {
+    syncUrl.oninput = (e) => { STATE.syncDraft = { ...syncDraft(), url: e.target.value.trim() }; };
+  }
+
+  const syncSecret = document.getElementById('syncSecret');
+  if (syncSecret) {
+    syncSecret.oninput = (e) => { STATE.syncDraft = { ...syncDraft(), secret: e.target.value.trim() }; };
+  }
+
   document.querySelectorAll('[data-yards]').forEach((input) => {
     input.oninput = (e) => {
       const idx = Number(input.getAttribute('data-yards'));
       STATE.courseDraft.tees[STATE.courseTeeIdx].holes[idx].yards = e.target.value;
     };
   });
+}
+
+function syncDraft() {
+  return STATE.syncDraft || sync.getConfig();
 }
 
 function isValidDist(value) {
@@ -777,6 +867,9 @@ function finishRound() {
   STATE.viewRoundId = round.id;
   STATE.round = null;
   go('summary', { viewRoundId: round.id });
+  // The round is already saved locally; this just tries to get it
+  // onto the sheet while the phone probably has signal again.
+  sync.syncInBackground();
 }
 
 function startRound(teeName) {
@@ -839,7 +932,76 @@ function exportData() {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Runs a sync operation with the button disabled and the outcome
+ * reported inline. Nothing here is on a path the user has to wait
+ * for — the data is already safe locally before any of it runs.
+ */
+async function runSync(label, operation) {
+  STATE.syncBusy = true;
+  STATE.syncStatus = null;
+  // Clear any leftover save confirmation so the result is the only
+  // message on screen.
+  STATE.notice = null;
+  STATE.error = null;
+  render();
+  try {
+    const message = await operation();
+    STATE.syncStatus = { text: message, bad: false };
+  } catch (err) {
+    STATE.syncStatus = { text: `${label} failed. ${err.message}`, bad: true };
+  } finally {
+    STATE.syncBusy = false;
+    render();
+  }
+}
+
 const ACTIONS = {
+  'goto-settings': () => go('settings', { syncDraft: null }),
+
+  'save-sync-config': () => {
+    const draft = syncDraft();
+    if (!draft.url || !draft.secret) {
+      STATE.error = 'Both the URL and the secret are needed.';
+      return render();
+    }
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(draft.url)) {
+      STATE.error = 'That does not look like a deployed Web App URL. It should end in /exec.';
+      return render();
+    }
+    sync.setConfig({ url: draft.url, secret: draft.secret });
+    go('settings', { syncDraft: null, notice: 'Saved. Test the connection next.' });
+  },
+
+  'test-sync': () => runSync('Connection test', async () => {
+    await sync.ping();
+    return 'Connected. The backend answered.';
+  }),
+
+  'setup-sheets': () => runSync('Tab setup', async () => {
+    const result = await sync.setupSheets();
+    return `Ready. Tabs: ${result.sheets.join(', ')}.`;
+  }),
+
+  'sync-now': () => runSync('Sync', async () => {
+    const result = await sync.syncAll();
+    if (result.errors.length) throw new Error(result.errors.join(' '));
+    return `Pushed ${result.pushed}, pulled ${result.pulled} round${result.pulled === 1 ? '' : 's'}.`;
+  }),
+
+  'full-pull': () => runSync('Pull', async () => {
+    await sync.pullCourses();
+    const result = await sync.pullRounds({ full: true });
+    return `Pulled ${result.added} new round${result.added === 1 ? '' : 's'} of ${result.seen} on the sheet.`;
+  }),
+
+  'sign-out': () => {
+    store.clearPlayer();
+    STATE.player = null;
+    STATE.round = null;
+    go('login');
+  },
+
   'pick-player': (el) => {
     STATE.player = el.getAttribute('data-player');
     store.setPlayer(STATE.player);
@@ -895,8 +1057,14 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-par]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-par],[data-scope]');
   if (!target) return;
+
+  const scope = target.getAttribute('data-scope');
+  if (scope) {
+    STATE.historyScope = scope;
+    return render();
+  }
 
   const nav = target.getAttribute('data-nav');
   if (nav) {
@@ -977,6 +1145,18 @@ function init() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+
+  // Opportunistic catch-up: on launch, and again whenever the phone
+  // finds signal after a round played out of coverage.
+  sync.syncInBackground(refreshIfIdle);
+  window.addEventListener('online', () => sync.syncInBackground(refreshIfIdle));
+}
+
+/** Re-render after a background sync, but never mid shot-entry. */
+function refreshIfIdle(result) {
+  if (!result || (!result.pulled && !result.pushed)) return;
+  if (STATE.screen === 'play' || STATE.screen === 'courseEdit') return;
+  render();
 }
 
 init();

@@ -78,13 +78,26 @@ export function getRound(id) {
 /** Stores the full round (raw shots included) newest-first. */
 export function saveRound(round) {
   const rounds = getRounds().filter((r) => r.id !== round.id);
-  rounds.unshift(round);
+  rounds.push(round);
+  rounds.sort((a, b) => new Date(b.date) - new Date(a.date));
   write(KEYS.rounds, rounds);
   enqueueSync(round.id);
 }
 
+/**
+ * Write a round WITHOUT queueing it for sync. Used when a round
+ * arrives from the sheet — queueing it would push it straight back.
+ */
+export function replaceRound(round) {
+  const rounds = getRounds().filter((r) => r.id !== round.id);
+  rounds.push(round);
+  rounds.sort((a, b) => new Date(b.date) - new Date(a.date));
+  write(KEYS.rounds, rounds);
+}
+
 export function deleteRound(id) {
   write(KEYS.rounds, getRounds().filter((r) => r.id !== id));
+  markSynced(id);
 }
 
 /* --- Courses ---------------------------------------------------- */

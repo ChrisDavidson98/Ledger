@@ -26,10 +26,12 @@ For phone use, deploy to GitHub Pages and add it to your home screen.
 | --- | --- |
 | `src/baseline.js` | Expected-strokes tables, shot classification, miss-direction vocabulary |
 | `src/model.js` | Round/hole/shot structures and every derived number |
-| `src/storage.js` | localStorage persistence, plus the sync queue Phase 2 will drain |
+| `src/storage.js` | localStorage persistence and the sync queue |
 | `src/courses.js` | Course records and scorecard validation |
+| `src/sync.js` | Google Sheet sync — push, pull, shape conversion |
 | `src/app.js` | Screens, state, event wiring |
 | `sw.js` | Offline app shell |
+| `apps-script/Code.gs` | The Sheet backend. Setup: [`apps-script/README.md`](apps-script/README.md) |
 
 ### Two rules the code is built around
 
