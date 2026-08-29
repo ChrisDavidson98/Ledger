@@ -61,6 +61,19 @@ totals. Entirely derived from `shots` — handy for charts, not authoritative.
 
 **`courses`** is one row per hole per tee set.
 
+## The CORS approach is confirmed working
+
+Verified against a live deployment, not just in theory. A browser `POST` with
+`Content-Type: text/plain` reaches `doPost`, and the JSON reply is readable
+cross-origin — which is what makes the whole sync layer viable, since Apps
+Script cannot answer the preflight a normal JSON POST would trigger.
+
+A quick way to check any deployment without revealing the secret: open the
+`/exec` URL in a browser. A healthy one answers
+`{"ok":true,"service":"ledger","version":1}`. Posting a deliberately wrong
+secret should come back `{"ok":false,"error":"Bad or missing secret."}` — that
+response proves transport, parsing and the secret check are all wired up.
+
 ## Things worth knowing
 
 **Editing the sheet by hand is risky.** The app pushes a whole round at a time,
