@@ -11,6 +11,7 @@
 const PREFIX = 'ledger:';
 const KEYS = {
   player: PREFIX + 'player',
+  roster: PREFIX + 'roster',
   activeRound: PREFIX + 'active_round',
   rounds: PREFIX + 'rounds',
   courses: PREFIX + 'courses',
@@ -49,6 +50,36 @@ export function setPlayer(name) {
 
 export function clearPlayer() {
   localStorage.removeItem(KEYS.player);
+}
+
+/* --- Roster ----------------------------------------------------- */
+
+const DEFAULT_ROSTER = ['Chris', 'Kaden', 'Manny'];
+
+/**
+ * Who may sign in on this device. Editable from Settings so a fourth
+ * name never needs a code change. Per-device by design — this is
+ * identity, not security. What actually keeps strangers out of the
+ * data is the shared secret on the sheet.
+ */
+export function getRoster() {
+  const stored = read(KEYS.roster, null);
+  return Array.isArray(stored) && stored.length ? stored : [...DEFAULT_ROSTER];
+}
+
+export function setRoster(names) {
+  const cleaned = names
+    .map((n) => String(n).trim())
+    .filter(Boolean)
+    .filter((n, i, all) => all.findIndex((x) => x.toLowerCase() === n.toLowerCase()) === i);
+  write(KEYS.roster, cleaned.length ? cleaned : [...DEFAULT_ROSTER]);
+}
+
+/** Case-insensitive lookup returning the roster's own capitalisation. */
+export function matchPlayer(name) {
+  const wanted = String(name || '').trim().toLowerCase();
+  if (!wanted) return null;
+  return getRoster().find((n) => n.toLowerCase() === wanted) || null;
 }
 
 /* --- Active round ----------------------------------------------- */

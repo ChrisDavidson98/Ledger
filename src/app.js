@@ -41,6 +41,7 @@ import {
 import * as store from './storage.js';
 import * as sync from './sync.js';
 import { missingSeeds, cloneSeed } from './seed.js';
+import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js';
 
 import {
   newCourse,
@@ -61,8 +62,6 @@ import {
   newCombo,
 } from './courses.js';
 
-const PLAYERS = ['Chris', 'Kaden', 'Manny'];
-
 const STATE = {
   screen: 'login',
   player: null,
@@ -76,6 +75,10 @@ const STATE = {
   setupCourseId: null, // course chosen, awaiting a tee and layout
   setupTee: null,
   viewRoundId: null,
+  loginDraft: '',
+  importText: '',
+  importPreview: null,
+  importCourse: null,
   historyScope: 'mine',
   syncBusy: false,
   syncStatus: null,
@@ -149,7 +152,7 @@ const NAV_GROUPS = {
   home: ['home', 'setup', 'play', 'summary'],
   history: ['history', 'detail', 'settings'],
   stats: ['stats'],
-  courses: ['courses', 'courseEdit'],
+  courses: ['courses', 'courseEdit', 'courseImport'],
 };
 
 function renderNav() {
@@ -165,15 +168,14 @@ function renderNav() {
 /* --- Screens ----------------------------------------------------- */
 
 function screenLogin() {
-  return `${topbar('Who is playing?')}
+  return `${topbar('Sign in')}
     <div class="card">
-      <h2>Sign in</h2>
-      <p class="muted">Pick your name. Rounds are kept separately for each player on this device.</p>
-      <div class="stack" style="margin-top:14px">
-        ${PLAYERS.map((p) => `
-          <button class="btn-primary" data-action="pick-player" data-player="${esc(p)}">${esc(p)}</button>
-        `).join('')}
-      </div>
+      <h2>Ledger</h2>
+      <p class="muted">Enter your name to continue.</p>
+      ${STATE.error ? `<div class="err-box">${esc(STATE.error)}</div>` : ''}
+      <input type="text" id="loginName" placeholder="Name" autocapitalize="words"
+             autocorrect="off" spellcheck="false" value="${esc(STATE.loginDraft || '')}">
+      <button class="btn-primary" style="margin-top:12px" data-action="sign-in">Sign In</button>
     </div>`;
 }
 
@@ -575,12 +577,61 @@ function screenSettings() {
     </div>
 
     <div class="card">
+      <h2>Who can sign in</h2>
+      <p class="muted">One name per line. Anyone on this list can sign in on this device by typing their name.</p>
+      <textarea id="rosterBox" rows="${Math.max(4, store.getRoster().length + 1)}"
+        style="width:100%;padding:12px;border-radius:9px;border:1.5px solid var(--green-line);background:var(--paper);font-family:inherit;font-size:16px;color:var(--ink)">${esc(store.getRoster().join('\n'))}</textarea>
+      <button class="btn-ghost" style="margin-top:10px" data-action="save-roster">Save Names</button>
+      <p class="tiny">This list lives on this phone, so adding a name here does not add it on anyone else's. It is identity, not a lock &mdash; what actually keeps strangers out of the data is the sheet secret above.</p>
+    </div>
+
+    <div class="card">
       <h2>Player</h2>
       <p class="muted">Signed in as ${esc(STATE.player)}.</p>
-      <button class="btn-ghost" data-action="sign-out">Switch Player</button>
+      <button class="btn-ghost" data-action="sign-out">Sign Out</button>
     </div>
 
     <button class="btn-ghost" data-action="goto-history">&larr; Back</button>`;
+}
+
+function screenCourseImport() {
+  const preview = STATE.importPreview;
+
+  return `${topbar('Import a Card')}
+    ${notices()}
+    <div class="card">
+      <h2>From a photo</h2>
+      <p class="muted">Photograph the scorecard, hand it to any chat along with the prompt below, and paste back what it gives you. Nothing is saved until you have looked at it.</p>
+      <button class="btn-ghost" data-action="copy-prompt">Copy the Prompt</button>
+    </div>
+
+    <div class="card">
+      <label>Paste the result</label>
+      <textarea id="importBox" rows="8" placeholder='{ "name": "...", "tees": [...], "nines": [...] }'
+        style="width:100%;padding:12px;border-radius:9px;border:1.5px solid var(--green-line);background:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--ink)">${esc(STATE.importText || '')}</textarea>
+      <button class="btn-primary" style="margin-top:10px" data-action="preview-import">Check It</button>
+    </div>
+
+    ${preview ? `
+      <div class="card">
+        <div class="split">
+          <h2>${esc(preview.name)}</h2>
+          <span class="tiny">${esc(preview.city || '')}</span>
+        </div>
+        ${preview.nines.map((nine) => `
+          <div class="row">
+            <div class="badge">${nine.par}</div>
+            <div class="row-meta">
+              <div class="rname">${esc(nine.name)}</div>
+              <div class="rsub">${nine.totals.map((t) => `${esc(t.tee)} ${t.yards}y`).join(' &middot; ')}</div>
+            </div>
+          </div>`).join('')}
+        ${preview.combos.length ? `<p class="tiny" style="margin-top:8px">Pairings: ${esc(preview.combos.join(', '))}</p>` : ''}
+        <p class="tiny">Check these totals against the card before saving. It will be marked unverified until you do.</p>
+        <button class="btn-primary" style="margin-top:10px" data-action="commit-import">Save This Course</button>
+      </div>` : ''}
+
+    <button class="btn-ghost" data-action="goto-courses">&larr; Back</button>`;
 }
 
 function screenDetail() {
@@ -701,7 +752,10 @@ function screenCourses() {
           </div>
           <div class="row-val">&rsaquo;</div>
         </button>`).join('')}
-      <button class="btn-primary" style="margin-top:12px" data-action="new-course">Add a Course</button>
+      <button class="btn-primary" style="margin-top:12px" data-action="new-course">Add a Course by Hand</button>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="goto-import">Import from a Photo</button>
+      </div>
       ${pendingSeeds.length ? `
         <div class="btn-row">
           <button class="btn-ghost" data-action="load-seeds">
@@ -838,6 +892,7 @@ const SCREENS = {
   settings: screenSettings,
   stats: screenStats,
   courses: screenCourses,
+  courseImport: screenCourseImport,
   courseEdit: screenCourseEdit,
 };
 
@@ -872,6 +927,21 @@ function bindLiveInputs() {
   const courseName = document.getElementById('courseName');
   if (courseName) {
     courseName.oninput = (e) => { STATE.courseDraft.name = e.target.value; };
+  }
+
+  const loginName = document.getElementById('loginName');
+  if (loginName) {
+    loginName.oninput = (e) => { STATE.loginDraft = e.target.value; };
+    // The name is the whole form, so Enter should submit it.
+    loginName.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); ACTIONS['sign-in'](); }
+    };
+    loginName.focus();
+  }
+
+  const importBox = document.getElementById('importBox');
+  if (importBox) {
+    importBox.oninput = (e) => { STATE.importText = e.target.value; };
   }
 
   const courseCity = document.getElementById('courseCity');
@@ -1184,9 +1254,17 @@ const ACTIONS = {
     go('login');
   },
 
-  'pick-player': (el) => {
-    STATE.player = el.getAttribute('data-player');
-    store.setPlayer(STATE.player);
+  'sign-in': () => {
+    const typed = (document.getElementById('loginName') || {}).value || STATE.loginDraft;
+    const matched = store.matchPlayer(typed);
+    if (!matched) {
+      STATE.loginDraft = typed;
+      STATE.error = 'That name is not set up on this device.';
+      return render();
+    }
+    STATE.player = matched;
+    STATE.loginDraft = '';
+    store.setPlayer(matched);
     loadActiveRound();
     go(STATE.round && !isRoundComplete(STATE.round) ? 'play' : 'home');
   },
@@ -1217,6 +1295,56 @@ const ACTIONS = {
     store.deleteRound(el.getAttribute('data-id'));
     go('history');
   },
+  'goto-import': () => go('courseImport', { importText: '', importPreview: null }),
+
+  'copy-prompt': async () => {
+    try {
+      await navigator.clipboard.writeText(EXTRACTION_PROMPT);
+      go('courseImport', { notice: 'Prompt copied. Paste it into a chat with your photo.' });
+    } catch (err) {
+      // Clipboard access is blocked in some contexts; show it instead
+      // so the prompt is still reachable.
+      STATE.importText = EXTRACTION_PROMPT;
+      STATE.error = 'Could not copy automatically — the prompt is in the box below, copy it from there.';
+      render();
+    }
+  },
+
+  'preview-import': () => {
+    const text = (document.getElementById('importBox') || {}).value || STATE.importText;
+    STATE.importText = text;
+    try {
+      const course = parseCourseText(text);
+      STATE.importCourse = course;
+      STATE.importPreview = describeCourse(course);
+      STATE.error = null;
+      STATE.notice = null;
+    } catch (err) {
+      STATE.importCourse = null;
+      STATE.importPreview = null;
+      STATE.error = err.message;
+    }
+    render();
+  },
+
+  'commit-import': () => {
+    if (!STATE.importCourse) return;
+    const course = STATE.importCourse;
+    upsertCourse(course);
+    go('courses', {
+      importText: '', importPreview: null, importCourse: null,
+      notice: `Saved ${course.name}. Check it in the editor and it will show as verified.`,
+    });
+  },
+
+  'save-roster': () => {
+    const box = document.getElementById('rosterBox');
+    if (!box) return;
+    const names = box.value.split('\n');
+    store.setRoster(names);
+    go('settings', { notice: `Names saved: ${store.getRoster().join(', ')}.` });
+  },
+
   'load-seeds': () => {
     const pending = missingSeeds(listCourses());
     pending.forEach((course) => upsertCourse(cloneSeed(course)));

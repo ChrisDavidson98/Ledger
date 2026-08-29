@@ -29,6 +29,7 @@ For phone use, deploy to GitHub Pages and add it to your home screen.
 | `src/storage.js` | localStorage persistence and the sync queue |
 | `src/courses.js` | Course records, nines, pairings, scorecard validation |
 | `src/seed.js` | Scorecards transcribed from the paper cards |
+| `src/import.js` | Bringing a scorecard in from pasted text |
 | `src/sync.js` | Google Sheet sync — push, pull, shape conversion |
 | `src/app.js` | Screens, state, event wiring |
 | `sw.js` | Offline app shell |
@@ -66,13 +67,39 @@ why the stats screen normalises to *per 18 holes* instead of per round.
   right. It is a separate diagnostic layer: SG says how much a shot cost, the
   miss grid says why.
 
+## Adding a course
+
+**Courses → Import from a Photo** is the fast path. Photograph the scorecard,
+hand the photo to any chat along with the prompt the screen gives you, and paste
+back what it returns. The import is checked and shown as per-nine totals before
+anything is written, and lands marked *unverified* until somebody has looked at
+it against the card.
+
+**Courses → Add a Course by Hand** is the fallback, and is how the seeded cards
+were built.
+
+There was going to be an in-app AI course lookup. It was dropped: Gardner's
+published hole-by-hole yardages turned out wrong on all nine holes, and an app
+that quietly starts a round on bad numbers is worse than one that asks you to
+paste a card. The photo route gets the same convenience with the numbers on
+screen first, and needs no API key, proxy or rate limiting.
+
+## Signing in
+
+A name typed into a box, matched against a roster held on the device. The roster
+is editable under **Rounds → Settings → Who can sign in**, so a fourth player
+never needs a code change.
+
+This is identity, not a lock. Anyone who finds the URL gets an empty app; what
+keeps them out of the *data* is the shared secret on the sheet.
+
 ## Status
 
-Phase 1 is done: offline, single device, manual scorecards.
+- **Phase 1** — done. Offline, single device.
+- **Phase 2** — code complete, needs the sheet deployed. See
+  [`apps-script/README.md`](apps-script/README.md).
+- **Phase 3** — dropped in favour of photo import, above.
+- **Phase 4** — handicap-level baselines, trends over time, head-to-head.
 
-- **Phase 2** — Google Sheet backend, sync queue, shared rounds across players
-- **Phase 3** — course lookup through a server-side proxy, cached and rate limited
-- **Phase 4** — handicap-level baselines, trends over time, head-to-head
-
-Until Phase 2 lands, all data lives in one browser on one device. Use
-**Rounds → Export All Data** for a backup.
+Until the sheet is deployed, all data lives in one browser on one device. Use
+**Rounds → Export Backup** for a copy.
