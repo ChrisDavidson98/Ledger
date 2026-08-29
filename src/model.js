@@ -15,20 +15,25 @@ import {
   CATEGORIES,
 } from './baseline.js';
 
-export function newRound({ player, courseId, courseName, teeName, holes }) {
+export function newRound({ player, courseId, courseName, teeName, layout, holes }) {
   return {
     id: 'r_' + Date.now().toString(36),
-    schema: 1,
+    schema: 2,
     player,
     courseId,
     courseName,
     teeName,
+    layout: layout || null, // which nine or pairing was played
     date: new Date().toISOString(),
     finishedAt: null,
     holes: holes.map((h) => ({
       hole: h.hole,
       par: h.par,
       yards: h.yards,
+      // Kept so a course played twice round can still name the
+      // physical hole a shot was struck on.
+      sourceNine: h.sourceNine || null,
+      sourceHole: h.sourceHole || h.hole,
       shots: [],
       done: false,
     })),

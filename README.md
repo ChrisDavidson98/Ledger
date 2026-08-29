@@ -27,7 +27,8 @@ For phone use, deploy to GitHub Pages and add it to your home screen.
 | `src/baseline.js` | Expected-strokes tables, shot classification, miss-direction vocabulary |
 | `src/model.js` | Round/hole/shot structures and every derived number |
 | `src/storage.js` | localStorage persistence and the sync queue |
-| `src/courses.js` | Course records and scorecard validation |
+| `src/courses.js` | Course records, nines, pairings, scorecard validation |
+| `src/seed.js` | Scorecards transcribed from the paper cards |
 | `src/sync.js` | Google Sheet sync — push, pull, shape conversion |
 | `src/app.js` | Screens, state, event wiring |
 | `sw.js` | Offline app shell |
@@ -44,6 +45,13 @@ whatever the tables said the day you played.
 **Nothing blocks on the network.** Phone signal on a golf course is bad. Writes
 go to localStorage; the Google Sheet backend arriving in Phase 2 is a sync
 target behind `storage.js`, not a save button.
+
+**A course is a facility made of nines, not an 18-hole block.** That is what
+the courses here actually are: Gardner is one nine played twice, St Andrews is
+two nines, Sykes/Lady is three nines played as any of three pairings. Eighteen
+as the unit could not represent Gardner at all. It also makes a nine after work
+a round in its own right rather than an eighteen somebody abandoned — which is
+why the stats screen normalises to *per 18 holes* instead of per round.
 
 ### Conventions worth knowing
 

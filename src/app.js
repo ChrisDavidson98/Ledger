@@ -40,16 +40,25 @@ import {
 
 import * as store from './storage.js';
 import * as sync from './sync.js';
+import { missingSeeds, cloneSeed } from './seed.js';
 
 import {
   newCourse,
-  blankTee,
   listCourses,
-  findTee,
-  teePar,
-  teeYardage,
   upsertCourse,
-  validateTee,
+  playOptions,
+  findPlayOption,
+  buildRoundHoles,
+  totalYards,
+  totalPar,
+  ninePar,
+  nineYardage,
+  validateNine,
+  validateCourse,
+  addTee,
+  removeTee,
+  addNine,
+  newCombo,
 } from './courses.js';
 
 const PLAYERS = ['Chris', 'Kaden', 'Manny'];
@@ -62,7 +71,10 @@ const STATE = {
   draft: {},           // in-progress shot entry
   courseDraft: null,   // course being edited
   courseTeeIdx: 0,
-  setupCourseId: null, // course chosen, awaiting a tee
+  courseNineIdx: 0,
+  comboDraft: null,
+  setupCourseId: null, // course chosen, awaiting a tee and layout
+  setupTee: null,
   viewRoundId: null,
   historyScope: 'mine',
   syncBusy: false,
@@ -224,10 +236,10 @@ function screenSetup() {
       ` : `
         ${courses.map((c) => `
           <button class="row" data-action="pick-course" data-id="${esc(c.id)}">
-            <div class="badge">${c.tees.length}</div>
+            <div class="badge">${c.nines.length * 9}</div>
             <div class="row-meta">
               <div class="rname">${esc(c.name)}</div>
-              <div class="rsub">${c.tees.map((t) => esc(t.name)).join(' &middot; ')}</div>
+              <div class="rsub">${esc(c.teeNames.join(' · '))}</div>
             </div>
             <div class="row-val">&rsaquo;</div>
           </button>
@@ -242,25 +254,46 @@ function screenSetup() {
 function screenPickTee() {
   const course = store.getCourse(STATE.setupCourseId);
   if (!course) return screenSetup();
+
+  const tee = STATE.setupTee || course.teeNames[0];
+  const options = playOptions(course);
+  const nines = options.filter((o) => o.holeCount === 9);
+  const eighteens = options.filter((o) => o.holeCount === 18);
+
+  const optionRow = (option) => `
+    <button class="row" data-action="start-round" data-option="${esc(option.key)}">
+      <div class="badge">${totalPar(course, option, tee)}</div>
+      <div class="row-meta">
+        <div class="rname">${esc(option.label)}</div>
+        <div class="rsub">${option.holeCount} holes &middot; ${totalYards(course, option, tee).toLocaleString()}y from ${esc(tee)}</div>
+      </div>
+      <div class="row-val">&rsaquo;</div>
+    </button>`;
+
   return `${topbar(course.name)}
     ${notices()}
     <div class="card">
-      <h2>Which tees?</h2>
-      <p class="muted">Yardages come from the scorecard you saved, so this is instant.</p>
-      ${course.tees.map((t) => `
-        <button class="row" data-action="start-round" data-tee="${esc(t.name)}">
-          <div class="badge">${teePar(t)}</div>
-          <div class="row-meta">
-            <div class="rname">${esc(t.name)}</div>
-            <div class="rsub">${teeYardage(t).toLocaleString()} yards &middot; par ${teePar(t)}</div>
-          </div>
-          <div class="row-val">&rsaquo;</div>
-        </button>
-      `).join('')}
-      <div class="btn-row">
-        <button class="btn-ghost" data-action="edit-course" data-id="${esc(course.id)}">Edit Scorecard</button>
+      <h2>Tees</h2>
+      <div class="chip-grid">
+        ${course.teeNames.map((name) => `
+          <button class="chip ${name === tee ? 'active' : ''}" data-setup-tee="${esc(name)}">${esc(name)}</button>
+        `).join('')}
       </div>
-    </div>`;
+    </div>
+
+    ${eighteens.length ? `
+      <div class="card">
+        <h2>Eighteen</h2>
+        ${eighteens.map(optionRow).join('')}
+      </div>` : ''}
+
+    <div class="card">
+      <h2>Nine</h2>
+      <p class="muted">A nine after work counts as its own round, not half of one.</p>
+      ${nines.map(optionRow).join('')}
+    </div>
+
+    <button class="btn-ghost" data-action="edit-course" data-id="${esc(course.id)}">Edit Scorecard</button>`;
 }
 
 function screenPlay() {
@@ -269,7 +302,7 @@ function screenPlay() {
   const hole = round.holes[STATE.holeIdx];
   const start = lieAfter(hole);
   const played = playedHoles(round).length;
-  const pct = Math.round((played / 18) * 100);
+  const pct = Math.round((played / round.holes.length) * 100);
 
   const shotNum = hole.shots.length + 1;
   const category = classifyShot({
@@ -284,10 +317,12 @@ function screenPlay() {
     ${notices()}
     <div class="card">
       <div class="progress">
-        <span class="mono muted">Hole ${hole.hole}</span>
+        <span class="mono muted">Hole ${hole.hole}/${round.holes.length}</span>
         <div class="track"><div class="fill" style="width:${pct}%"></div></div>
         <span class="mono muted">${fmtToPar(roundToPar(round))}</span>
       </div>
+      ${hole.sourceNine && hole.sourceHole !== hole.hole
+        ? `<p class="tiny" style="margin:-4px 0 8px">${esc(hole.sourceNine)} hole ${hole.sourceHole}</p>` : ''}
       <div class="stat-grid g4">
         <div class="stat-box"><div class="val">${hole.par}</div><div class="lbl">Par</div></div>
         <div class="stat-box"><div class="val">${hole.yards}</div><div class="lbl">Yards</div></div>
@@ -383,7 +418,7 @@ function renderShotForm(hole, start, category, shotNum) {
 function renderHoleComplete(hole) {
   const totals = holeTotals(hole);
   const score = holeScore(hole);
-  const last = STATE.holeIdx >= 17;
+  const last = STATE.holeIdx >= STATE.round.holes.length - 1;
   return `<div class="card">
     <h2>Hole ${hole.hole} &mdash; ${score} (${fmtToPar(score - hole.par)})</h2>
     <div class="stat-grid g4">
@@ -571,19 +606,24 @@ function screenStats() {
       </div>`;
   }
 
+  // Normalised per 18 holes, otherwise a weekday nine would drag the
+  // average toward zero purely for being short.
+  const holesPlayed = rounds.reduce((sum, r) => sum + playedHoles(r).length, 0) || 1;
   const avg = {};
   CATEGORIES.forEach((c) => {
-    avg[c] = rounds.reduce((sum, r) => sum + roundTotals(r)[c], 0) / rounds.length;
+    const total = rounds.reduce((sum, r) => sum + roundTotals(r)[c], 0);
+    avg[c] = (total / holesPlayed) * 18;
   });
   const avgTotal = CATEGORIES.reduce((sum, c) => sum + avg[c], 0);
+  const nineCount = rounds.filter((r) => playedHoles(r).length <= 9).length;
   const buckets = approachBuckets(rounds);
   const teeMiss = missTally(rounds, 'ott');
   const appMiss = missTally(rounds, 'app');
 
   return `${topbar(`${STATE.player} · Stats`)}
     <div class="card">
-      <h2>Average per round</h2>
-      <p class="muted">Across ${rounds.length} round${rounds.length === 1 ? '' : 's'}.</p>
+      <h2>Average per 18 holes</h2>
+      <p class="muted">Across ${rounds.length} round${rounds.length === 1 ? '' : 's'}${nineCount ? ` (${nineCount} of them nine holes)` : ''}, ${holesPlayed} holes in all.</p>
       <div class="stat-grid g4">
         ${CATEGORIES.map((c) => `
           <div class="stat-box">
@@ -644,6 +684,7 @@ function renderMissCard(title, { tally, total }) {
 
 function screenCourses() {
   const courses = listCourses();
+  const pendingSeeds = missingSeeds(courses);
   return `${topbar('Courses')}
     ${notices()}
     <div class="card">
@@ -653,60 +694,100 @@ function screenCourses() {
         <div class="empty"><div class="glyph">&#128220;</div><div>Nothing saved yet.</div></div>
       ` : courses.map((c) => `
         <button class="row" data-action="edit-course" data-id="${esc(c.id)}">
-          <div class="badge">${c.tees.length}</div>
+          <div class="badge">${c.nines.length * 9}</div>
           <div class="row-meta">
-            <div class="rname">${esc(c.name)}</div>
-            <div class="rsub">${c.tees.map((t) => `${esc(t.name)} ${teeYardage(t)}y`).join(' &middot; ')}</div>
+            <div class="rname">${esc(c.name)} ${c.verified ? '<span class="tiny sg-pos">verified</span>' : ''}</div>
+            <div class="rsub">${c.city ? esc(c.city) + ' &middot; ' : ''}${c.nines.map((n) => esc(n.name)).join(' / ')} &middot; ${esc(c.teeNames.join(', '))}</div>
           </div>
           <div class="row-val">&rsaquo;</div>
         </button>`).join('')}
       <button class="btn-primary" style="margin-top:12px" data-action="new-course">Add a Course</button>
+      ${pendingSeeds.length ? `
+        <div class="btn-row">
+          <button class="btn-ghost" data-action="load-seeds">
+            Load ${pendingSeeds.length} Saved Card${pendingSeeds.length === 1 ? '' : 's'}
+          </button>
+        </div>
+        <p class="tiny">${esc(pendingSeeds.map((c) => c.name).join(', '))} &mdash; transcribed from the paper scorecard.</p>
+      ` : ''}
     </div>`;
 }
 
 function screenCourseEdit() {
   const course = STATE.courseDraft;
   if (!course) return screenCourses();
-  const tee = course.tees[STATE.courseTeeIdx];
-  const problems = validateTee(tee);
+
+  const nine = course.nines[STATE.courseNineIdx] || course.nines[0];
+  const tee = course.teeNames[STATE.courseTeeIdx] || course.teeNames[0];
+  const problems = validateNine(nine, tee);
 
   return `${topbar('Scorecard')}
     ${notices()}
     <div class="card">
       <label>Course name</label>
-      <input type="text" id="courseName" value="${esc(course.name)}" placeholder="Course name">
-
-      <label>Tee sets</label>
-      <div class="tee-tabs">
-        ${course.tees.map((t, i) => `
-          <button class="chip ${i === STATE.courseTeeIdx ? 'active' : ''}" data-tee-idx="${i}">${esc(t.name)}</button>
-        `).join('')}
-        <button class="chip" data-action="add-tee">+ Tee</button>
-      </div>
-
-      <label>Tee name</label>
-      <input type="text" id="teeName" value="${esc(tee.name)}" placeholder="Blue">
+      <input type="text" id="courseName" value="${esc(course.name)}" placeholder="Gardner Golf Course">
+      <label>Town</label>
+      <input type="text" id="courseCity" value="${esc(course.city || '')}" placeholder="Gardner, KS">
     </div>
 
     <div class="card">
       <div class="split">
-        <h2>${esc(tee.name)}</h2>
-        <span class="tiny mono">par ${teePar(tee)} &middot; ${teeYardage(tee)}y</span>
+        <h2>Nines</h2>
+        <span class="tiny">${course.nines.length * 9} holes total</span>
+      </div>
+      <p class="muted">One nine for a course played twice round, two for a standard eighteen, three or more for a facility like Sykes.</p>
+      <div class="tee-tabs">
+        ${course.nines.map((n, i) => `
+          <button class="chip ${i === STATE.courseNineIdx ? 'active' : ''}" data-nine-idx="${i}">${esc(n.name)}</button>
+        `).join('')}
+        <button class="chip" data-action="add-nine">+ Nine</button>
+      </div>
+      <label>Name of this nine</label>
+      <input type="text" id="nineName" value="${esc(nine.name)}" placeholder="West Links">
+    </div>
+
+    <div class="card">
+      <div class="split">
+        <h2>Tees</h2>
+        <span class="tiny">enter one tee at a time</span>
+      </div>
+      <div class="tee-tabs">
+        ${course.teeNames.map((name, i) => `
+          <button class="chip ${i === STATE.courseTeeIdx ? 'active' : ''}" data-tee-idx="${i}">${esc(name)}</button>
+        `).join('')}
+        <button class="chip" data-action="add-tee">+ Tee</button>
+      </div>
+      <label>Name of this tee</label>
+      <div class="split">
+        <input type="text" id="teeName" value="${esc(tee)}" placeholder="Blue">
+        ${course.teeNames.length > 1
+          ? `<button class="chip" data-action="remove-tee" data-tee="${esc(tee)}" style="flex-shrink:0;padding:0 14px">Remove</button>`
+          : ''}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="split">
+        <h2>${esc(nine.name)} &middot; ${esc(tee)}</h2>
+        <span class="tiny mono">par ${ninePar(nine)} &middot; ${nineYardage(nine, tee)}y</span>
       </div>
       <div class="card-editor">
         <div class="hdr"><span>#</span><span>Par</span><span>Yards</span></div>
-        ${tee.holes.map((h, i) => `
+        ${nine.holes.map((hole, i) => `
           <div class="line">
-            <span class="hno">${h.hole}</span>
+            <span class="hno">${hole.hole}</span>
             <span class="par-toggle">
               ${[3, 4, 5].map((p) => `
-                <button class="${Number(h.par) === p ? 'active' : ''}" data-par="${p}" data-hole="${i}">${p}</button>
+                <button class="${Number(hole.par) === p ? 'active' : ''}" data-par="${p}" data-hole="${i}">${p}</button>
               `).join('')}
             </span>
-            <input type="number" inputmode="numeric" data-yards="${i}" value="${esc(h.yards)}">
+            <input type="number" inputmode="numeric" data-yards="${i}" value="${esc(hole.yards[tee] == null ? '' : hole.yards[tee])}">
           </div>`).join('')}
       </div>
+      <p class="tiny" style="margin-top:8px">Par is shared across every tee. Yardages are per tee &mdash; switch tabs above to enter the next one.</p>
     </div>
+
+    ${course.nines.length > 1 ? renderCombos(course) : ''}
 
     ${problems.length ? `<div class="err-box">${problems.slice(0, 3).map(esc).join('<br>')}</div>` : ''}
 
@@ -717,6 +798,31 @@ function screenCourseEdit() {
         ${course.persisted ? `<button class="btn-danger" data-action="delete-course" data-id="${esc(course.id)}">Delete</button>` : ''}
       </div>
     </div>`;
+}
+
+function renderCombos(course) {
+  const draft = STATE.comboDraft || {};
+  return `<div class="card">
+    <h2>Eighteen-hole pairings</h2>
+    <p class="muted">Which nines get played together. Sykes has three of these; most courses have one.</p>
+    ${course.combos.length ? course.combos.map((combo) => `
+      <div class="row">
+        <div class="badge">18</div>
+        <div class="row-meta"><div class="rname">${esc(combo.name)}</div></div>
+        <button class="chip" data-action="remove-combo" data-id="${esc(combo.id)}" style="padding:0 14px;min-height:38px">Remove</button>
+      </div>`).join('') : '<p class="tiny">None yet.</p>'}
+
+    <label>Add a pairing</label>
+    <div class="chip-grid g2">
+      <select id="comboFirst">
+        ${course.nines.map((n) => `<option value="${esc(n.id)}" ${draft.first === n.id ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}
+      </select>
+      <select id="comboSecond">
+        ${course.nines.map((n) => `<option value="${esc(n.id)}" ${draft.second === n.id ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}
+      </select>
+    </div>
+    <button class="btn-ghost" data-action="add-combo">Add Pairing</button>
+  </div>`;
 }
 
 /* --- Render ------------------------------------------------------ */
@@ -768,10 +874,42 @@ function bindLiveInputs() {
     courseName.oninput = (e) => { STATE.courseDraft.name = e.target.value; };
   }
 
+  const courseCity = document.getElementById('courseCity');
+  if (courseCity) {
+    courseCity.oninput = (e) => { STATE.courseDraft.city = e.target.value; };
+  }
+
+  // Renames apply on blur rather than per keystroke: a tee rename has
+  // to migrate its yardage key across every nine, and doing that on
+  // each character would shred the data halfway through a word.
+  const nineName = document.getElementById('nineName');
+  if (nineName) {
+    nineName.onchange = (e) => {
+      const name = e.target.value.trim();
+      if (name) STATE.courseDraft.nines[STATE.courseNineIdx].name = name;
+      render();
+    };
+  }
+
   const teeName = document.getElementById('teeName');
   if (teeName) {
-    teeName.oninput = (e) => {
-      STATE.courseDraft.tees[STATE.courseTeeIdx].name = e.target.value;
+    teeName.onchange = (e) => {
+      renameTee(STATE.courseDraft, STATE.courseTeeIdx, e.target.value.trim());
+      render();
+    };
+  }
+
+  const comboFirst = document.getElementById('comboFirst');
+  if (comboFirst) {
+    comboFirst.onchange = (e) => {
+      STATE.comboDraft = { ...(STATE.comboDraft || {}), first: e.target.value };
+    };
+  }
+
+  const comboSecond = document.getElementById('comboSecond');
+  if (comboSecond) {
+    comboSecond.onchange = (e) => {
+      STATE.comboDraft = { ...(STATE.comboDraft || {}), second: e.target.value };
     };
   }
 
@@ -788,8 +926,24 @@ function bindLiveInputs() {
   document.querySelectorAll('[data-yards]').forEach((input) => {
     input.oninput = (e) => {
       const idx = Number(input.getAttribute('data-yards'));
-      STATE.courseDraft.tees[STATE.courseTeeIdx].holes[idx].yards = e.target.value;
+      const tee = STATE.courseDraft.teeNames[STATE.courseTeeIdx];
+      STATE.courseDraft.nines[STATE.courseNineIdx].holes[idx].yards[tee] = e.target.value;
     };
+  });
+}
+
+/** Rename a tee everywhere at once, carrying its yardages with it. */
+function renameTee(course, teeIdx, nextName) {
+  const previous = course.teeNames[teeIdx];
+  const name = nextName.trim();
+  if (!name || name === previous || course.teeNames.includes(name)) return;
+
+  course.teeNames[teeIdx] = name;
+  course.nines.forEach((nine) => {
+    nine.holes.forEach((hole) => {
+      hole.yards[name] = hole.yards[previous];
+      delete hole.yards[previous];
+    });
   });
 }
 
@@ -852,7 +1006,7 @@ function undoShot() {
 }
 
 function nextHole() {
-  if (STATE.holeIdx >= 17) return finishRound();
+  if (STATE.holeIdx >= STATE.round.holes.length - 1) return finishRound();
   STATE.holeIdx += 1;
   STATE.draft = {};
   store.saveActiveRound(STATE.round);
@@ -872,25 +1026,36 @@ function finishRound() {
   sync.syncInBackground();
 }
 
-function startRound(teeName) {
+function startRound(optionKey) {
   const course = store.getCourse(STATE.setupCourseId);
-  const tee = findTee(course, teeName);
-  const problems = validateTee(tee);
+  const option = findPlayOption(course, optionKey);
+  const tee = STATE.setupTee || course.teeNames[0];
+  if (!option) {
+    STATE.error = 'That layout is no longer on the scorecard.';
+    render();
+    return;
+  }
+
+  // Only validate the nines actually being played — a half-filled
+  // third nine should not block a round on the other two.
+  const problems = [];
+  option.nineIds.forEach((id) => {
+    const nine = course.nines.find((n) => n.id === id);
+    if (nine) problems.push(...validateNine(nine, tee));
+  });
   if (problems.length) {
     STATE.error = problems[0] + ' Fix the scorecard before starting.';
     render();
     return;
   }
+
   STATE.round = newRound({
     player: STATE.player,
     courseId: course.id,
     courseName: course.name,
-    teeName: tee.name,
-    holes: tee.holes.map((h) => ({
-      hole: h.hole,
-      par: Number(h.par),
-      yards: Number(h.yards),
-    })),
+    teeName: tee,
+    layout: option.label,
+    holes: buildRoundHoles(course, option, tee),
   });
   STATE.holeIdx = 0;
   STATE.draft = {};
@@ -901,21 +1066,38 @@ function startRound(teeName) {
 
 function saveCourseDraft() {
   const course = STATE.courseDraft;
-  course.tees.forEach((tee) => {
-    tee.holes.forEach((h) => {
-      h.par = Number(h.par);
-      h.yards = Number(h.yards);
+
+  course.nines.forEach((nine) => {
+    nine.holes.forEach((hole) => {
+      hole.par = Number(hole.par);
+      course.teeNames.forEach((tee) => {
+        const value = hole.yards[tee];
+        hole.yards[tee] = value === '' || value == null ? '' : Number(value);
+      });
     });
   });
-  const problems = validateTee(course.tees[STATE.courseTeeIdx]);
+
+  if (!course.name || !course.name.trim()) {
+    STATE.error = 'Give the course a name first.';
+    return render();
+  }
+
+  // Only the tee on screen has to be complete. Saving a card one tee
+  // at a time is the whole point — the rest can be filled in later.
+  const problems = [];
+  const tee = course.teeNames[STATE.courseTeeIdx];
+  course.nines.forEach((nine) => problems.push(...validateNine(nine, tee)));
   if (problems.length) {
     STATE.error = problems[0];
-    render();
-    return;
+    return render();
   }
+
   course.persisted = true;
   upsertCourse(course);
-  go('courses', { courseDraft: null, notice: `Saved ${course.name}.` });
+  go('courses', {
+    courseDraft: null,
+    notice: `Saved ${course.name}. ${tee} tees are complete.`,
+  });
 }
 
 function exportData() {
@@ -1018,8 +1200,10 @@ const ACTIONS = {
   'goto-setup': () => go('setup', { setupCourseId: null }),
   'goto-history': () => go('history'),
   'goto-courses': () => go('courses', { courseDraft: null }),
-  'pick-course': (el) => go('setup', { setupCourseId: el.getAttribute('data-id') }),
-  'start-round': (el) => startRound(el.getAttribute('data-tee')),
+  'pick-course': (el) => go('setup', {
+    setupCourseId: el.getAttribute('data-id'), setupTee: null,
+  }),
+  'start-round': (el) => startRound(el.getAttribute('data-option')),
   'save-shot': saveShot,
   'undo-shot': undoShot,
   'next-hole': nextHole,
@@ -1033,18 +1217,74 @@ const ACTIONS = {
     store.deleteRound(el.getAttribute('data-id'));
     go('history');
   },
-  'new-course': () => go('courseEdit', { courseDraft: newCourse(''), courseTeeIdx: 0 }),
+  'load-seeds': () => {
+    const pending = missingSeeds(listCourses());
+    pending.forEach((course) => upsertCourse(cloneSeed(course)));
+    go('courses', {
+      notice: `Loaded ${pending.map((c) => c.name).join(', ')}.`,
+    });
+  },
+
+  'new-course': () => go('courseEdit', {
+    courseDraft: newCourse(''), courseTeeIdx: 0, courseNineIdx: 0, comboDraft: null,
+  }),
+
   'edit-course': (el) => {
     const course = store.getCourse(el.getAttribute('data-id'));
     if (!course) return;
     go('courseEdit', {
       courseDraft: JSON.parse(JSON.stringify({ ...course, persisted: true })),
       courseTeeIdx: 0,
+      courseNineIdx: 0,
+      comboDraft: null,
     });
   },
+
   'add-tee': () => {
-    STATE.courseDraft.tees.push(blankTee('New Tee'));
-    STATE.courseTeeIdx = STATE.courseDraft.tees.length - 1;
+    const name = prompt('Name of the tee (Blue, White, Red, Forward…)');
+    if (!name) return;
+    if (STATE.courseDraft.teeNames.includes(name.trim())) {
+      STATE.error = `There is already a ${name.trim()} tee.`;
+      return render();
+    }
+    addTee(STATE.courseDraft, name);
+    STATE.courseTeeIdx = STATE.courseDraft.teeNames.length - 1;
+    render();
+  },
+
+  'remove-tee': (el) => {
+    const tee = el.getAttribute('data-tee');
+    if (!confirm(`Remove the ${tee} tee and its yardages?`)) return;
+    removeTee(STATE.courseDraft, tee);
+    STATE.courseTeeIdx = 0;
+    render();
+  },
+
+  'add-nine': () => {
+    const name = prompt('Name of the nine (West Links, Back…)');
+    if (!name) return;
+    addNine(STATE.courseDraft, name.trim());
+    STATE.courseNineIdx = STATE.courseDraft.nines.length - 1;
+    render();
+  },
+
+  'add-combo': () => {
+    const course = STATE.courseDraft;
+    const draft = STATE.comboDraft || {};
+    const first = draft.first || course.nines[0].id;
+    const second = draft.second || course.nines[0].id;
+    const combo = newCombo(course, first, second);
+    if (course.combos.some((c) => c.nineIds.join() === combo.nineIds.join())) {
+      STATE.error = 'That pairing is already listed.';
+      return render();
+    }
+    course.combos.push(combo);
+    go('courseEdit', { comboDraft: null });
+  },
+
+  'remove-combo': (el) => {
+    const id = el.getAttribute('data-id');
+    STATE.courseDraft.combos = STATE.courseDraft.combos.filter((c) => c.id !== id);
     render();
   },
   'save-course': saveCourseDraft,
@@ -1057,7 +1297,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-par],[data-scope]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope]');
   if (!target) return;
 
   const scope = target.getAttribute('data-scope');
@@ -1099,16 +1339,28 @@ function onClick(event) {
     return render();
   }
 
+  const setupTee = target.getAttribute('data-setup-tee');
+  if (setupTee) {
+    STATE.setupTee = setupTee;
+    return render();
+  }
+
   const teeIdx = target.getAttribute('data-tee-idx');
   if (teeIdx !== null) {
     STATE.courseTeeIdx = Number(teeIdx);
     return render();
   }
 
+  const nineIdx = target.getAttribute('data-nine-idx');
+  if (nineIdx !== null) {
+    STATE.courseNineIdx = Number(nineIdx);
+    return render();
+  }
+
   const par = target.getAttribute('data-par');
   if (par !== null) {
     const holeIdx = Number(target.getAttribute('data-hole'));
-    STATE.courseDraft.tees[STATE.courseTeeIdx].holes[holeIdx].par = Number(par);
+    STATE.courseDraft.nines[STATE.courseNineIdx].holes[holeIdx].par = Number(par);
     return render();
   }
 
@@ -1123,7 +1375,7 @@ function loadActiveRound() {
   if (active && active.player === STATE.player) {
     STATE.round = active;
     const next = nextUnplayedHole(active);
-    STATE.holeIdx = next === null ? 17 : next;
+    STATE.holeIdx = next === null ? active.holes.length - 1 : next;
   } else {
     STATE.round = null;
     STATE.holeIdx = 0;

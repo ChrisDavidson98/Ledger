@@ -285,7 +285,7 @@ export async function pullCourses() {
   let added = 0;
 
   (data.courses || []).forEach((course) => {
-    if (!course.tees || !course.tees.length) return;
+    if (!course.nines || !course.nines.length) return;
     if (!localIds.has(course.id)) added += 1;
     store.saveCourse(course);
   });

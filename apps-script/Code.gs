@@ -30,9 +30,11 @@ var SHEETS = {
     'end_lie', 'end_dist', 'end_unit',
     'holed', 'penalty', 'miss', 'category', 'sg',
   ],
+  // One row per hole per tee per nine. A course is a facility made of
+  // nines, so the nine is part of the key, not the 18-hole block.
   courses: [
-    'course_id', 'course_name', 'tee_name', 'hole', 'par', 'yards',
-    'verified', 'updated_at',
+    'course_id', 'course_name', 'city', 'nine_id', 'nine_name',
+    'tee_name', 'hole', 'par', 'yards', 'verified', 'combos', 'updated_at',
   ],
 };
 
@@ -229,17 +231,28 @@ function pushCourses(courses) {
   var rows = [];
   var now = new Date().toISOString();
   courses.forEach(function (course) {
-    (course.tees || []).forEach(function (tee) {
-      (tee.holes || []).forEach(function (hole) {
-        rows.push({
-          course_id: course.id,
-          course_name: course.name,
-          tee_name: tee.name,
-          hole: hole.hole,
-          par: hole.par,
-          yards: hole.yards,
-          verified: course.verified ? 'yes' : 'no',
-          updated_at: now,
+    // Pairings are course-level, so they ride along on every row
+    // rather than needing a tab of their own.
+    var combos = JSON.stringify(course.combos || []);
+    (course.nines || []).forEach(function (nine) {
+      (nine.holes || []).forEach(function (hole) {
+        (course.teeNames || []).forEach(function (teeName) {
+          var yards = hole.yards ? hole.yards[teeName] : '';
+          if (yards === '' || yards === undefined || yards === null) return;
+          rows.push({
+            course_id: course.id,
+            course_name: course.name,
+            city: course.city || '',
+            nine_id: nine.id,
+            nine_name: nine.name,
+            tee_name: teeName,
+            hole: hole.hole,
+            par: hole.par,
+            yards: yards,
+            verified: course.verified ? 'yes' : 'no',
+            combos: combos,
+            updated_at: now,
+          });
         });
       });
     });
@@ -249,7 +262,7 @@ function pushCourses(courses) {
   return { ok: true, written: rows.length };
 }
 
-/** Flat hole rows reassembled into the nested course shape the app uses. */
+/** Flat rows reassembled into the nested course shape the app uses. */
 function pullCourses() {
   var rows = readAll('courses');
   var byCourse = {};
@@ -257,23 +270,37 @@ function pullCourses() {
   rows.forEach(function (row) {
     var id = String(row.course_id);
     if (!id) return;
+
     if (!byCourse[id]) {
+      var combos = [];
+      try { combos = JSON.parse(row.combos || '[]'); } catch (err) { combos = []; }
       byCourse[id] = {
         id: id,
         name: row.course_name,
+        city: row.city || '',
         verified: row.verified === 'yes',
         source: 'sheet',
-        tees: {},
+        combos: combos,
+        teeNames: [],
+        nines: {},
       };
     }
+
     var course = byCourse[id];
     var teeName = String(row.tee_name);
-    if (!course.tees[teeName]) course.tees[teeName] = [];
-    course.tees[teeName].push({
-      hole: Number(row.hole),
-      par: Number(row.par),
-      yards: Number(row.yards),
-    });
+    if (course.teeNames.indexOf(teeName) === -1) course.teeNames.push(teeName);
+
+    var nineId = String(row.nine_id);
+    if (!course.nines[nineId]) {
+      course.nines[nineId] = { id: nineId, name: row.nine_name, holes: {} };
+    }
+
+    var nine = course.nines[nineId];
+    var holeNum = Number(row.hole);
+    if (!nine.holes[holeNum]) {
+      nine.holes[holeNum] = { hole: holeNum, par: Number(row.par), yards: {} };
+    }
+    nine.holes[holeNum].yards[teeName] = Number(row.yards);
   });
 
   var courses = Object.keys(byCourse).map(function (id) {
@@ -281,12 +308,19 @@ function pullCourses() {
     return {
       id: course.id,
       name: course.name,
+      city: course.city,
       verified: course.verified,
       source: 'sheet',
-      tees: Object.keys(course.tees).map(function (teeName) {
+      teeNames: course.teeNames,
+      combos: course.combos,
+      nines: Object.keys(course.nines).map(function (nineId) {
+        var nine = course.nines[nineId];
         return {
-          name: teeName,
-          holes: course.tees[teeName].sort(function (a, b) { return a.hole - b.hole; }),
+          id: nine.id,
+          name: nine.name,
+          holes: Object.keys(nine.holes)
+            .map(function (h) { return nine.holes[h]; })
+            .sort(function (a, b) { return a.hole - b.hole; }),
         };
       }),
     };
