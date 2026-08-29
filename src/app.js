@@ -939,6 +939,16 @@ function screenCourseEdit() {
     ${problems.length ? `<div class="err-box">${problems.slice(0, 3).map(esc).join('<br>')}</div>` : ''}
 
     <div class="card">
+      <h2>Checked against the card?</h2>
+      <p class="muted">Marks whether a person has actually compared these numbers to the paper scorecard. Anything imported from a photo starts off unchecked.</p>
+      <div class="chip-grid g2">
+        <button class="chip ${course.verified ? '' : 'active'}" data-verified="no">Not yet</button>
+        <button class="chip ${course.verified ? 'active' : ''}" data-verified="yes">Checked</button>
+      </div>
+      ${course.verified ? '' : `<p class="tiny">Worth doing before you rely on the numbers &mdash; Gardner's published yardages were wrong on all nine holes.</p>`}
+    </div>
+
+    <div class="card">
       <button class="btn-primary" data-action="save-course">Save Course</button>
       <div class="btn-row">
         <button class="btn-ghost" data-action="goto-courses">Cancel</button>
@@ -1510,7 +1520,7 @@ const ACTIONS = {
     upsertCourse(course);
     go('courses', {
       importText: '', importPreview: null, importCourse: null, importForce: false,
-      notice: `Saved ${course.name}. Check it in the editor and it will show as verified.`,
+      notice: `Saved ${course.name}. Open it and mark it checked once you have compared it to the card.`,
     });
     sync.syncInBackground();
   },
@@ -1603,8 +1613,14 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified]');
   if (!target) return;
+
+  const verified = target.getAttribute('data-verified');
+  if (verified !== null) {
+    STATE.courseDraft.verified = verified === 'yes';
+    return render();
+  }
 
   const scope = target.getAttribute('data-scope');
   if (scope) {
