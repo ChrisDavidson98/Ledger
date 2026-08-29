@@ -139,34 +139,63 @@ function readAll(name) {
   });
 }
 
-/** Delete every row whose `column` matches one of `values`, bottom-up. */
-function deleteRowsWhere(name, column, values) {
-  if (!values.length) return;
-  var wanted = {};
-  values.forEach(function (v) { wanted[String(v)] = true; });
-
-  var sheet = sheetFor(name);
-  var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return;
-  var colIdx = data[0].indexOf(column);
-  if (colIdx === -1) return;
-
-  for (var r = data.length - 1; r >= 1; r--) {
-    if (wanted[String(data[r][colIdx])]) sheet.deleteRow(r + 1);
-  }
-}
-
-function appendRows(name, rows) {
-  if (!rows.length) return;
-  var sheet = sheetFor(name);
+function toMatrix(name, rows) {
   var headers = SHEETS[name];
-  var matrix = rows.map(function (row) {
+  return rows.map(function (row) {
     return headers.map(function (h) {
       var v = row[h];
       return v === undefined || v === null ? '' : v;
     });
   });
-  sheet.getRange(sheet.getLastRow() + 1, 1, matrix.length, headers.length).setValues(matrix);
+}
+
+/**
+ * Replace every row matching `values` in `column` with `newRows`, in
+ * one read and one write.
+ *
+ * This used to call sheet.deleteRow() per matching row. With a few
+ * hundred rows that is a few hundred API calls, it is visible to
+ * anyone watching the sheet, and it risks hitting the six-minute
+ * execution limit PART WAY THROUGH — rows deleted, replacements never
+ * written. Reading everything, filtering in memory and writing once
+ * removes both the slowness and that failure mode.
+ */
+function replaceRows(name, column, values, newRows) {
+  var sheet = sheetFor(name);
+  var headers = SHEETS[name];
+  var width = headers.length;
+  var colIdx = headers.indexOf(column);
+  if (colIdx === -1) throw new Error('No ' + column + ' column on ' + name + '.');
+
+  var wanted = {};
+  (values || []).forEach(function (v) { wanted[String(v)] = true; });
+
+  var lastRow = sheet.getLastRow();
+  var survivors = [];
+  if (lastRow > 1) {
+    var data = sheet.getRange(2, 1, lastRow - 1, width).getValues();
+    for (var r = 0; r < data.length; r++) {
+      var row = data[r];
+      // Blank padding rows are dropped rather than carried forward.
+      var blank = true;
+      for (var c = 0; c < width; c++) {
+        if (row[c] !== '' && row[c] !== null) { blank = false; break; }
+      }
+      if (blank) continue;
+      if (!wanted[String(row[colIdx])]) survivors.push(row);
+    }
+  }
+
+  var all = survivors.concat(toMatrix(name, newRows || []));
+
+  // Clear only what was there, then write the result in one go.
+  if (lastRow > 1) {
+    sheet.getRange(2, 1, lastRow - 1, width).clearContent();
+  }
+  if (all.length) {
+    sheet.getRange(2, 1, all.length, width).setValues(all);
+  }
+  return all.length;
 }
 
 /* --- Rounds ------------------------------------------------------ */
@@ -180,8 +209,6 @@ function pushRounds(rounds) {
   if (!rounds.length) return { ok: true, written: 0 };
 
   var ids = rounds.map(function (r) { return r.summary.round_id; });
-  deleteRowsWhere('rounds', 'round_id', ids);
-  deleteRowsWhere('shots', 'round_id', ids);
 
   var summaryRows = [];
   var shotRows = [];
@@ -194,8 +221,8 @@ function pushRounds(rounds) {
     (payload.shots || []).forEach(function (shot) { shotRows.push(shot); });
   });
 
-  appendRows('rounds', summaryRows);
-  appendRows('shots', shotRows);
+  replaceRows('rounds', 'round_id', ids, summaryRows);
+  replaceRows('shots', 'round_id', ids, shotRows);
 
   return { ok: true, written: summaryRows.length, shots: shotRows.length };
 }
@@ -226,8 +253,6 @@ function pushCourses(courses) {
   if (!courses.length) return { ok: true, written: 0 };
 
   var ids = courses.map(function (c) { return c.id; });
-  deleteRowsWhere('courses', 'course_id', ids);
-
   var rows = [];
   var now = new Date().toISOString();
   courses.forEach(function (course) {
@@ -258,7 +283,7 @@ function pushCourses(courses) {
     });
   });
 
-  appendRows('courses', rows);
+  replaceRows('courses', 'course_id', ids, rows);
   return { ok: true, written: rows.length };
 }
 
