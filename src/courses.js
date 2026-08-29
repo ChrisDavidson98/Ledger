@@ -176,6 +176,53 @@ export function upsertCourse(course) {
   return course;
 }
 
+/* --- Duplicate detection ------------------------------------------ */
+
+/**
+ * A fingerprint of the actual holes: pars plus every tee's yardages.
+ * Tees are sorted by name so two people entering the same card in a
+ * different tee order still match, and the course name is ignored
+ * entirely — "Gardner GC" and "Gardner Golf Course" are the same 3,156
+ * yards either way.
+ */
+export function nineFingerprint(nine, teeNames) {
+  const pars = nine.holes.map((h) => Number(h.par) || 0).join(',');
+  const tees = [...teeNames].sort().map((tee) => {
+    const yards = nine.holes.map((h) => Number(h.yards[tee]) || 0).join(',');
+    return `${tee}:${yards}`;
+  }).join('|');
+  return `${pars}#${tees}`;
+}
+
+/** Order-insensitive fingerprint of every nine at a course. */
+export function courseFingerprint(course) {
+  return (course.nines || [])
+    .map((nine) => nineFingerprint(nine, course.teeNames || []))
+    .sort()
+    .join('||');
+}
+
+/**
+ * Look for an existing course that is the same card. Returns an exact
+ * hole-for-hole match if there is one, otherwise a name collision,
+ * so the two cases can be reported differently — one is a duplicate,
+ * the other is probably a correction.
+ */
+export function findDuplicate(course, existing = getCourses()) {
+  const print = courseFingerprint(course);
+  const others = existing.filter((c) => c.id !== course.id);
+
+  const identical = others.find((c) => courseFingerprint(c) === print);
+  if (identical) return { kind: 'identical', course: identical };
+
+  const sameName = others.find(
+    (c) => c.name.trim().toLowerCase() === String(course.name).trim().toLowerCase()
+  );
+  if (sameName) return { kind: 'name', course: sameName };
+
+  return null;
+}
+
 /* --- Validation --------------------------------------------------- */
 
 /**

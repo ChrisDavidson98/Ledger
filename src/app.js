@@ -55,6 +55,7 @@ import {
   ninePar,
   nineYardage,
   validateNine,
+  findDuplicate,
   validateCourse,
   addTee,
   removeTee,
@@ -168,14 +169,32 @@ function renderNav() {
 /* --- Screens ----------------------------------------------------- */
 
 function screenLogin() {
+  const locked = sync.needsPassphrase();
+
   return `${topbar('Sign in')}
     <div class="card">
       <h2>Ledger</h2>
-      <p class="muted">Enter your name to continue.</p>
+      <p class="muted">${locked
+        ? 'This device is not unlocked yet. Enter the passphrase and your name.'
+        : 'Enter your name to continue.'}</p>
       ${STATE.error ? `<div class="err-box">${esc(STATE.error)}</div>` : ''}
+
+      ${locked ? `
+        <label>Passphrase</label>
+        <input type="password" id="loginPass" placeholder="Passphrase" autocapitalize="off"
+               autocorrect="off" spellcheck="false" value="${esc(STATE.passDraft || '')}">
+      ` : ''}
+
+      <label>Name</label>
       <input type="text" id="loginName" placeholder="Name" autocapitalize="words"
              autocorrect="off" spellcheck="false" value="${esc(STATE.loginDraft || '')}">
-      <button class="btn-primary" style="margin-top:12px" data-action="sign-in">Sign In</button>
+
+      <button class="btn-primary" style="margin-top:12px" data-action="sign-in" ${STATE.syncBusy ? 'disabled' : ''}>
+        ${STATE.syncBusy ? 'Checking…' : 'Sign In'}
+      </button>
+
+      ${locked ? `<p class="tiny">The passphrase is checked against the sheet, so a wrong one reaches no data at all. It is asked for once per device.</p>` : ''}
+      ${!sync.hasUrl() ? `<p class="tiny">No sheet is connected on this device, so rounds stay local until one is set up in Settings.</p>` : ''}
     </div>`;
 }
 
@@ -589,6 +608,12 @@ function screenSettings() {
       <h2>Player</h2>
       <p class="muted">Signed in as ${esc(STATE.player)}.</p>
       <button class="btn-ghost" data-action="sign-out">Sign Out</button>
+      ${sync.isConfigured() ? `
+        <div class="btn-row">
+          <button class="btn-danger" data-action="lock-device">Forget Passphrase</button>
+        </div>
+        <p class="tiny">Sign Out just switches player. Forget Passphrase re-locks this phone &mdash; use it if you lose it or lend it out.</p>
+      ` : ''}
     </div>
 
     <button class="btn-ghost" data-action="goto-history">&larr; Back</button>`;
@@ -708,7 +733,62 @@ function screenStats() {
       </div>` : ''}
 
     ${renderMissCard('Tee shot misses', teeMiss)}
-    ${renderMissCard('Approach misses', appMiss)}`;
+    ${renderMissCard('Approach misses', appMiss)}
+    ${renderComparison()}`;
+}
+
+/**
+ * Everyone's numbers side by side. Normalised per 18 holes so a
+ * weekday nine compares honestly against a full Saturday round.
+ */
+function renderComparison() {
+  const everyone = store.getRounds();
+  const players = [...new Set(everyone.map((r) => r.player))].filter(Boolean);
+  if (players.length < 2) return '';
+
+  const rows = players.map((player) => {
+    const theirs = everyone.filter((r) => r.player === player);
+    const holes = theirs.reduce((sum, r) => sum + playedHoles(r).length, 0) || 1;
+    const totals = {};
+    CATEGORIES.forEach((c) => {
+      totals[c] = (theirs.reduce((sum, r) => sum + roundTotals(r)[c], 0) / holes) * 18;
+    });
+    totals.total = CATEGORIES.reduce((sum, c) => sum + totals[c], 0);
+    return { player, rounds: theirs.length, holes, totals };
+  }).sort((a, b) => b.totals.total - a.totals.total);
+
+  // Who is best in each category, so the strengths stand out.
+  const best = {};
+  CATEGORIES.forEach((c) => {
+    best[c] = rows.reduce((top, row) => (row.totals[c] > top.totals[c] ? row : top), rows[0]).player;
+  });
+
+  return `<div class="card">
+    <h2>Head to head</h2>
+    <p class="muted">Strokes gained per 18 holes. The leader in each part of the game is marked.</p>
+    <div class="card-editor">
+      <div class="hdr" style="grid-template-columns:1fr repeat(4,44px) 52px">
+        <span>Player</span>
+        ${CATEGORIES.map((c) => `<span style="text-align:center">${CATEGORY_SHORT[c]}</span>`).join('')}
+        <span style="text-align:center">Tot</span>
+      </div>
+      ${rows.map((row) => `
+        <div class="line" style="grid-template-columns:1fr repeat(4,44px) 52px">
+          <span>
+            <strong>${esc(row.player)}</strong>
+            <span class="tiny">${row.rounds} round${row.rounds === 1 ? '' : 's'}</span>
+          </span>
+          ${CATEGORIES.map((c) => `
+            <span class="mono ${sgClass(row.totals[c])}" style="text-align:center;font-size:12px">
+              ${fmtSG(row.totals[c])}${best[c] === row.player ? '<br><span class="tiny sg-pos">best</span>' : ''}
+            </span>`).join('')}
+          <span class="mono ${sgClass(row.totals.total)}" style="text-align:center;font-size:12px;font-weight:700">
+            ${fmtSG(row.totals.total)}
+          </span>
+        </div>`).join('')}
+    </div>
+    <p class="tiny" style="margin-top:8px">Everyone is measured against the same tour baseline, so these compare directly even off different tees.</p>
+  </div>`;
 }
 
 function renderMissCard(title, { tally, total }) {
@@ -929,14 +1009,20 @@ function bindLiveInputs() {
     courseName.oninput = (e) => { STATE.courseDraft.name = e.target.value; };
   }
 
+  const loginPass = document.getElementById('loginPass');
+  if (loginPass) {
+    loginPass.oninput = (e) => { STATE.passDraft = e.target.value; };
+  }
+
   const loginName = document.getElementById('loginName');
   if (loginName) {
     loginName.oninput = (e) => { STATE.loginDraft = e.target.value; };
-    // The name is the whole form, so Enter should submit it.
+    // The name is the last field either way, so Enter submits.
     loginName.onkeydown = (e) => {
       if (e.key === 'Enter') { e.preventDefault(); ACTIONS['sign-in'](); }
     };
-    loginName.focus();
+    if (!loginPass || STATE.passDraft) loginName.focus();
+    else loginPass.focus();
   }
 
   const importBox = document.getElementById('importBox');
@@ -1162,10 +1248,20 @@ function saveCourseDraft() {
     return render();
   }
 
+  // findDuplicate excludes the course's own id, so editing an existing
+  // card never trips this — only a genuinely second copy does.
+  const clash = findDuplicate(course);
+  if (clash && clash.kind === 'identical' && !STATE.courseForce) {
+    STATE.courseForce = true;
+    STATE.error = `Every hole matches ${clash.course.name}, which is already saved. Press Save again if you really want a second copy.`;
+    return render();
+  }
+
   course.persisted = true;
   upsertCourse(course);
   go('courses', {
     courseDraft: null,
+    courseForce: false,
     notice: `Saved ${course.name}. ${tee} tees are complete.`,
   });
 }
@@ -1254,7 +1350,7 @@ const ACTIONS = {
     go('login');
   },
 
-  'sign-in': () => {
+  'sign-in': async () => {
     const typed = (document.getElementById('loginName') || {}).value || STATE.loginDraft;
     const matched = store.matchPlayer(typed);
     if (!matched) {
@@ -1262,11 +1358,47 @@ const ACTIONS = {
       STATE.error = 'That name is not set up on this device.';
       return render();
     }
+
+    // Check the passphrase before letting anyone in, when one is due.
+    if (sync.needsPassphrase()) {
+      const pass = (document.getElementById('loginPass') || {}).value || STATE.passDraft;
+      if (!pass) {
+        STATE.loginDraft = typed;
+        STATE.error = 'The passphrase is needed to unlock this device.';
+        return render();
+      }
+      STATE.loginDraft = typed;
+      STATE.passDraft = pass;
+      STATE.syncBusy = true;
+      STATE.error = null;
+      render();
+      try {
+        await sync.unlock(pass);
+      } catch (err) {
+        STATE.syncBusy = false;
+        STATE.passDraft = '';
+        STATE.error = `Not unlocked. ${err.message}`;
+        return render();
+      }
+      STATE.syncBusy = false;
+    }
+
     STATE.player = matched;
     STATE.loginDraft = '';
+    STATE.passDraft = '';
     store.setPlayer(matched);
     loadActiveRound();
     go(STATE.round && !isRoundComplete(STATE.round) ? 'play' : 'home');
+    sync.syncInBackground(refreshIfIdle);
+  },
+
+  'lock-device': () => {
+    if (!confirm('Forget the passphrase on this phone? You will need it again to sign in.')) return;
+    sync.lock();
+    store.clearPlayer();
+    STATE.player = null;
+    STATE.round = null;
+    go('login', { notice: null });
   },
   resume: () => go('play'),
   'discard-round': () => {
@@ -1295,7 +1427,7 @@ const ACTIONS = {
     store.deleteRound(el.getAttribute('data-id'));
     go('history');
   },
-  'goto-import': () => go('courseImport', { importText: '', importPreview: null }),
+  'goto-import': () => go('courseImport', { importText: '', importPreview: null, importForce: false }),
 
   'copy-prompt': async () => {
     try {
@@ -1330,9 +1462,21 @@ const ACTIONS = {
   'commit-import': () => {
     if (!STATE.importCourse) return;
     const course = STATE.importCourse;
+
+    // Two phones both importing the same card would otherwise give you
+    // two entries in the picker and split the stats between them.
+    const clash = findDuplicate(course);
+    if (clash && !STATE.importForce) {
+      STATE.importForce = true;
+      STATE.error = clash.kind === 'identical'
+        ? `Every hole matches ${clash.course.name}, which is already saved. Save again only if you meant to.`
+        : `A course called ${clash.course.name} is already saved, but the numbers differ. Save as a second course, or go and fix that one instead.`;
+      return render();
+    }
+
     upsertCourse(course);
     go('courses', {
-      importText: '', importPreview: null, importCourse: null,
+      importText: '', importPreview: null, importCourse: null, importForce: false,
       notice: `Saved ${course.name}. Check it in the editor and it will show as verified.`,
     });
   },

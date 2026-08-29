@@ -37,6 +37,42 @@ export function isConfigured() {
   return Boolean(url && secret);
 }
 
+/** A sheet is known, but this device does not hold the passphrase. */
+export function needsPassphrase() {
+  const { url, secret } = getConfig();
+  return Boolean(url) && !secret;
+}
+
+export function hasUrl() {
+  return Boolean(getConfig().url);
+}
+
+/**
+ * Check a passphrase by actually asking the backend. There is no
+ * local copy to compare against on purpose: the passphrase IS the
+ * sheet secret, so a wrong one cannot reach any data no matter what
+ * the client believes. Kept on success so it is asked for once per
+ * device rather than once per round.
+ */
+export async function unlock(passphrase) {
+  const { url } = getConfig();
+  if (!url) throw new Error('No sheet is set up on this device yet.');
+  setConfig({ url, secret: String(passphrase || '').trim() });
+  try {
+    await ping();
+    return true;
+  } catch (err) {
+    setConfig({ url, secret: '' });
+    throw err;
+  }
+}
+
+/** Forget the passphrase but keep the sheet, so it is asked for again. */
+export function lock() {
+  const { url } = getConfig();
+  setConfig({ url, secret: '' });
+}
+
 function lastPull() {
   return localStorage.getItem(LAST_PULL_KEY) || null;
 }
