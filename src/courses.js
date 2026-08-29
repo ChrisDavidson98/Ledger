@@ -167,8 +167,50 @@ export function totalPar(course, option, teeName) {
 
 /* --- Storage ----------------------------------------------------- */
 
+/**
+ * Every stored course, repaired into a shape the screens can render.
+ *
+ * A course arriving from the sheet, an import, or an older version of
+ * this app may be missing fields the templates assume. One malformed
+ * record used to throw partway through building the list, which left
+ * the whole screen stale — courses that were still in storage looked
+ * like they had been deleted. Nothing is dropped here; it is only
+ * padded out so it can be seen and fixed.
+ */
 export function listCourses() {
-  return getCourses().slice().sort((a, b) => a.name.localeCompare(b.name));
+  return getCourses()
+    .map(repairCourse)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+
+export function repairCourse(course) {
+  const nines = Array.isArray(course.nines) ? course.nines : [];
+  const teeNames = Array.isArray(course.teeNames) && course.teeNames.length
+    ? course.teeNames
+    // Fall back to whatever tee names the holes themselves mention.
+    : [...new Set(nines.flatMap((n) => (n.holes || []).flatMap((h) => Object.keys(h.yards || {}))))];
+
+  return {
+    ...course,
+    name: course.name == null ? 'Untitled course' : String(course.name),
+    city: course.city == null ? '' : String(course.city),
+    teeNames: teeNames.length ? teeNames : ['White'],
+    nines: nines.map((nine) => ({
+      ...nine,
+      name: nine.name == null ? 'Nine' : String(nine.name),
+      holes: Array.isArray(nine.holes) ? nine.holes.map((h) => ({
+        ...h,
+        yards: h.yards && typeof h.yards === 'object' ? h.yards : {},
+      })) : [],
+    })),
+    combos: Array.isArray(course.combos) ? course.combos : [],
+  };
+}
+
+/** True when a course is missing something the screens need. */
+export function isIncomplete(course) {
+  return !Array.isArray(course.nines) || !course.nines.length
+    || !Array.isArray(course.teeNames) || !course.teeNames.length;
 }
 
 export function upsertCourse(course) {

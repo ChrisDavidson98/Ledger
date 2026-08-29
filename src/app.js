@@ -56,6 +56,8 @@ import {
   nineYardage,
   validateNine,
   findDuplicate,
+  repairCourse,
+  isIncomplete,
   validateCourse,
   addTee,
   removeTee,
@@ -273,7 +275,7 @@ function screenSetup() {
 }
 
 function screenPickTee() {
-  const course = store.getCourse(STATE.setupCourseId);
+  const course = safeCourse(STATE.setupCourseId);
   if (!course) return screenSetup();
 
   const tee = STATE.setupTee || course.teeNames[0];
@@ -835,7 +837,10 @@ function screenCourses() {
         <button class="row" data-action="edit-course" data-id="${esc(c.id)}">
           <div class="badge">${c.nines.length * 9}</div>
           <div class="row-meta">
-            <div class="rname">${esc(c.name)} ${c.verified ? '<span class="tiny sg-pos">verified</span>' : ''}</div>
+            <div class="rname">${esc(c.name)} ${
+              isIncomplete(c) ? '<span class="tiny sg-neg">needs fixing</span>'
+              : c.verified ? '<span class="tiny sg-pos">verified</span>' : ''
+            }</div>
             <div class="rsub">${c.city ? esc(c.city) + ' &middot; ' : ''}${c.nines.map((n) => esc(n.name)).join(' / ')} &middot; ${esc(c.teeNames.join(', '))}</div>
           </div>
           <div class="row-val">&rsaquo;</div>
@@ -1123,6 +1128,12 @@ function isValidDist(value) {
 
 /* --- Actions ----------------------------------------------------- */
 
+/** A course from storage, padded into a shape the screens can render. */
+function safeCourse(id) {
+  const course = store.getCourse(id);
+  return course ? repairCourse(course) : null;
+}
+
 function playerRounds() {
   return store.getRounds().filter((r) => r.player === STATE.player);
 }
@@ -1191,7 +1202,7 @@ function finishRound() {
 }
 
 function startRound(optionKey) {
-  const course = store.getCourse(STATE.setupCourseId);
+  const course = safeCourse(STATE.setupCourseId);
   const option = findPlayOption(course, optionKey);
   const tee = STATE.setupTee || course.teeNames[0];
   if (!option) {
@@ -1272,6 +1283,9 @@ function saveCourseDraft() {
     courseForce: false,
     notice: `Saved ${course.name}. ${tee} tees are complete.`,
   });
+  // Get it onto the sheet now. Without this a new course sat on one
+  // phone until something unrelated happened to trigger a sync.
+  sync.syncInBackground();
 }
 
 function exportData() {
@@ -1498,6 +1512,7 @@ const ACTIONS = {
       importText: '', importPreview: null, importCourse: null, importForce: false,
       notice: `Saved ${course.name}. Check it in the editor and it will show as verified.`,
     });
+    sync.syncInBackground();
   },
 
   'save-roster': () => {
@@ -1521,7 +1536,7 @@ const ACTIONS = {
   }),
 
   'edit-course': (el) => {
-    const course = store.getCourse(el.getAttribute('data-id'));
+    const course = safeCourse(el.getAttribute("data-id"));
     if (!course) return;
     go('courseEdit', {
       courseDraft: JSON.parse(JSON.stringify({ ...course, persisted: true })),
