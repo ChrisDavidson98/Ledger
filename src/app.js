@@ -122,6 +122,12 @@ function esc(str) {
   })[ch]);
 }
 
+/** True when running from a home-screen icon rather than a browser tab. */
+function isStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+}
+
 function fmtDate(iso) {
   return new Date(iso).toLocaleDateString(undefined, {
     month: 'short', day: 'numeric', year: 'numeric',
@@ -197,7 +203,14 @@ function screenLogin() {
 
       ${locked ? `<p class="tiny">The passphrase is checked against the sheet, so a wrong one reaches no data at all. It is asked for once per device.</p>` : ''}
       ${!sync.hasUrl() ? `<p class="tiny">No sheet is connected on this device, so rounds stay local until one is set up in Settings.</p>` : ''}
-    </div>`;
+    </div>
+
+    ${locked && isStandalone() === false ? `
+      <div class="card">
+        <h2>Add to your home screen first</h2>
+        <p class="muted">On a phone, the home screen version keeps its own separate data from the browser tab. Add it <em>before</em> signing in and you only have to do this once.</p>
+        <p class="tiny">iPhone: Share, then Add to Home Screen. Android: the browser menu, then Install or Add to Home screen. Then open it from the icon and sign in there.</p>
+      </div>` : ''}`;
 }
 
 function screenHome() {
@@ -1208,7 +1221,7 @@ function finishRound() {
   go('summary', { viewRoundId: round.id });
   // The round is already saved locally; this just tries to get it
   // onto the sheet while the phone probably has signal again.
-  sync.syncInBackground();
+  sync.syncInBackground(null, { force: true });
 }
 
 function startRound(optionKey) {
@@ -1295,7 +1308,7 @@ function saveCourseDraft() {
   });
   // Get it onto the sheet now. Without this a new course sat on one
   // phone until something unrelated happened to trigger a sync.
-  sync.syncInBackground();
+  sync.syncInBackground(null, { force: true });
 }
 
 function exportData() {
@@ -1421,7 +1434,8 @@ const ACTIONS = {
     store.setPlayer(matched);
     loadActiveRound();
     go(STATE.round && !isRoundComplete(STATE.round) ? 'play' : 'home');
-    sync.syncInBackground(refreshIfIdle);
+    sync.clearSetupParam();
+    sync.syncInBackground(refreshIfIdle, { force: true });
   },
 
   'copy-setup-link': async () => {
@@ -1522,7 +1536,7 @@ const ACTIONS = {
       importText: '', importPreview: null, importCourse: null, importForce: false,
       notice: `Saved ${course.name}. Open it and mark it checked once you have compared it to the card.`,
     });
-    sync.syncInBackground();
+    sync.syncInBackground(null, { force: true });
   },
 
   'save-roster': () => {
@@ -1724,10 +1738,14 @@ function init() {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
-  // Opportunistic catch-up: on launch, and again whenever the phone
-  // finds signal after a round played out of coverage.
-  sync.syncInBackground(refreshIfIdle);
-  window.addEventListener('online', () => sync.syncInBackground(refreshIfIdle));
+  // Opportunistic catch-up. Reopening the app is the important one:
+  // without it, somebody else's round only turned up on the next
+  // sign-in, which meant waiting a long time to see it.
+  sync.syncInBackground(refreshIfIdle, { force: true });
+  window.addEventListener('online', () => sync.syncInBackground(refreshIfIdle, { force: true }));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') sync.syncInBackground(refreshIfIdle);
+  });
 }
 
 /** Re-render after a background sync, but never mid shot-entry. */

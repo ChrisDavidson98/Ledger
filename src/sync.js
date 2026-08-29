@@ -104,12 +104,6 @@ export function applySetupLink() {
     const params = new URLSearchParams(window.location.search);
     const encoded = params.get('s');
     if (!encoded) return false;
-
-    // Strip it from the address bar either way, so it is not carried
-    // into bookmarks or the home-screen shortcut.
-    const clean = window.location.pathname;
-    window.history.replaceState({}, '', clean);
-
     if (hasUrl()) return false;
 
     const padded = encoded.replace(/-/g, '+').replace(/_/g, '/');
@@ -120,6 +114,28 @@ export function applySetupLink() {
     return true;
   } catch (err) {
     return false;
+  }
+}
+
+/**
+ * Drop the ?s= parameter — but only once this device is actually
+ * unlocked.
+ *
+ * It used to be stripped the moment the page loaded, which quietly
+ * broke the iOS route: open the link in Safari, add it to the home
+ * screen, and the shortcut you saved had already lost the parameter.
+ * A home-screen app is a separate storage container, so it started
+ * with no sheet at all and the link looked like it had done nothing.
+ * Keeping the parameter until sign-in succeeds means a shortcut saved
+ * at any point before that still carries what it needs.
+ */
+export function clearSetupParam() {
+  try {
+    if (!isConfigured()) return;
+    if (!new URLSearchParams(window.location.search).get('s')) return;
+    window.history.replaceState({}, '', window.location.pathname);
+  } catch (err) {
+    /* address bar tidying is never worth throwing over */
   }
 }
 
@@ -407,10 +423,25 @@ export async function syncAll() {
   return result;
 }
 
-/** Fire-and-forget flush, safe to call from anywhere. */
-export function syncInBackground(onDone) {
-  if (!isConfigured() || !navigator.onLine) return;
-  syncAll().then((result) => {
-    if (onDone) onDone(result);
-  }).catch(() => {});
+let lastAuto = 0;
+let inFlight = false;
+const AUTO_GAP_MS = 45000;
+
+/**
+ * Fire-and-forget flush, safe to call from anywhere and safe to call
+ * often — it will not stack up overlapping syncs, and automatic
+ * triggers are spaced out. Deliberate actions (a finished round, a
+ * saved course, Sync Now) pass force so they never get swallowed.
+ */
+export function syncInBackground(onDone, { force = false } = {}) {
+  if (!isConfigured() || !navigator.onLine || inFlight) return;
+  const now = Date.now();
+  if (!force && now - lastAuto < AUTO_GAP_MS) return;
+
+  lastAuto = now;
+  inFlight = true;
+  syncAll()
+    .then((result) => { if (onDone) onDone(result); })
+    .catch(() => {})
+    .finally(() => { inFlight = false; });
 }
