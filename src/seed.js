@@ -93,6 +93,75 @@ export const SEED_COURSES = [
       },
     ],
   },
+
+  {
+    // Transcribed from the 2024 Overland Park scorecard PDF rather
+    // than a golf directory, so all five tee complexes are included
+    // even though the three of us stick to Black/Blue/White.
+    id: 'seed_sykes',
+    name: 'Sykes/Lady Overland Park',
+    city: 'Overland Park, KS',
+    teeNames: ['Black', 'Blue', 'White', 'Gold', 'Red'],
+    verified: true,
+    source: 'scorecard',
+    nines: [
+      {
+        id: 'seed_sykes_west',
+        name: 'West Links',
+        holes: [
+          { hole: 1, par: 5, yards: { Black: 550, Blue: 507, White: 479, Gold: 399, Red: 358 } },
+          { hole: 2, par: 4, yards: { Black: 341, Blue: 331, White: 330, Gold: 271, Red: 240 } },
+          { hole: 3, par: 3, yards: { Black: 156, Blue: 147, White: 140, Gold: 128, Red: 123 } },
+          { hole: 4, par: 4, yards: { Black: 380, Blue: 367, White: 355, Gold: 293, Red: 265 } },
+          { hole: 5, par: 3, yards: { Black: 208, Blue: 180, White: 169, Gold: 137, Red: 103 } },
+          { hole: 6, par: 4, yards: { Black: 435, Blue: 412, White: 378, Gold: 342, Red: 306 } },
+          { hole: 7, par: 3, yards: { Black: 177, Blue: 151, White: 147, Gold: 125, Red: 120 } },
+          { hole: 8, par: 4, yards: { Black: 401, Blue: 363, White: 333, Gold: 272, Red: 224 } },
+          { hole: 9, par: 5, yards: { Black: 540, Blue: 495, White: 463, Gold: 427, Red: 368 } },
+        ],
+      },
+      {
+        // South's par row was the one line that would not come out of
+        // the PDF cleanly; these pars are read off the yardages and
+        // are the only numbers here not taken straight from the card.
+        id: 'seed_sykes_south',
+        name: 'South Links',
+        holes: [
+          { hole: 1, par: 5, yards: { Black: 517, Blue: 517, White: 509, Gold: 467, Red: 331 } },
+          { hole: 2, par: 3, yards: { Black: 150, Blue: 147, White: 136, Gold: 129, Red: 126 } },
+          { hole: 3, par: 4, yards: { Black: 384, Blue: 374, White: 359, Gold: 235, Red: 225 } },
+          { hole: 4, par: 4, yards: { Black: 431, Blue: 402, White: 350, Gold: 310, Red: 305 } },
+          { hole: 5, par: 3, yards: { Black: 153, Blue: 150, White: 143, Gold: 133, Red: 130 } },
+          { hole: 6, par: 5, yards: { Black: 543, Blue: 541, White: 531, Gold: 510, Red: 303 } },
+          { hole: 7, par: 4, yards: { Black: 389, Blue: 382, White: 372, Gold: 362, Red: 314 } },
+          { hole: 8, par: 3, yards: { Black: 177, Blue: 169, White: 147, Gold: 113, Red: 109 } },
+          { hole: 9, par: 4, yards: { Black: 397, Blue: 378, White: 330, Gold: 215, Red: 207 } },
+        ],
+      },
+      {
+        id: 'seed_sykes_north',
+        name: 'North Links',
+        holes: [
+          { hole: 1, par: 4, yards: { Black: 366, Blue: 355, White: 332, Gold: 299, Red: 277 } },
+          { hole: 2, par: 3, yards: { Black: 191, Blue: 189, White: 167, Gold: 134, Red: 107 } },
+          { hole: 3, par: 4, yards: { Black: 420, Blue: 405, White: 359, Gold: 286, Red: 238 } },
+          { hole: 4, par: 4, yards: { Black: 404, Blue: 383, White: 370, Gold: 303, Red: 273 } },
+          { hole: 5, par: 4, yards: { Black: 377, Blue: 356, White: 343, Gold: 290, Red: 238 } },
+          { hole: 6, par: 5, yards: { Black: 535, Blue: 526, White: 517, Gold: 411, Red: 357 } },
+          { hole: 7, par: 3, yards: { Black: 162, Blue: 151, White: 140, Gold: 118, Red: 106 } },
+          { hole: 8, par: 4, yards: { Black: 436, Blue: 402, White: 363, Gold: 341, Red: 209 } },
+          { hole: 9, par: 4, yards: { Black: 383, Blue: 344, White: 326, Gold: 308, Red: 280 } },
+        ],
+      },
+    ],
+    // The three pairings the course actually sells, confirmed by the
+    // rating table on the card.
+    combos: [
+      { id: 'seed_sykes_sn', name: 'South / North', nineIds: ['seed_sykes_south', 'seed_sykes_north'] },
+      { id: 'seed_sykes_nw', name: 'North / West', nineIds: ['seed_sykes_north', 'seed_sykes_west'] },
+      { id: 'seed_sykes_ws', name: 'West / South', nineIds: ['seed_sykes_west', 'seed_sykes_south'] },
+    ],
+  },
 ];
 
 /** Seed courses not already present, matched on id. */
