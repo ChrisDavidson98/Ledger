@@ -73,6 +73,56 @@ export function lock() {
   setConfig({ url, secret: '' });
 }
 
+/* --- Setup links -------------------------------------------------- */
+
+/**
+ * A link that points a new phone at the sheet without anyone having
+ * to retype an /exec URL. It carries the URL ONLY — never the
+ * passphrase, which is what makes the link safe to text. Whoever
+ * opens it still has to know the passphrase to reach any data, and
+ * the URL is not worth protecting on its own.
+ *
+ * Kept out of the repo on purpose: a URL sitting in public source is
+ * something strangers can pointlessly hammer, even though they cannot
+ * read anything.
+ */
+export function setupLink(origin = window.location.href) {
+  const { url } = getConfig();
+  if (!url) return null;
+  const base = origin.split('?')[0].split('#')[0];
+  const encoded = btoa(url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `${base}?s=${encoded}`;
+}
+
+/**
+ * Consume a ?s= parameter on load. Only applies when this device has
+ * no sheet yet, so a link can never silently repoint a working phone
+ * at somewhere else.
+ */
+export function applySetupLink() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const encoded = params.get('s');
+    if (!encoded) return false;
+
+    // Strip it from the address bar either way, so it is not carried
+    // into bookmarks or the home-screen shortcut.
+    const clean = window.location.pathname;
+    window.history.replaceState({}, '', clean);
+
+    if (hasUrl()) return false;
+
+    const padded = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const url = atob(padded);
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) return false;
+
+    setConfig({ url, secret: '' });
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 function lastPull() {
   return localStorage.getItem(LAST_PULL_KEY) || null;
 }

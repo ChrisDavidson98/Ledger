@@ -595,6 +595,14 @@ function screenSettings() {
       <p class="tiny">Pull Everything re-reads the whole sheet, rather than only what changed since the last sync. Use it on a new phone.</p>
     </div>
 
+    ${sync.hasUrl() ? `
+      <div class="card">
+        <h2>Add another phone</h2>
+        <p class="muted">Send this link to whoever is joining. Opening it points their phone at the sheet, so all they have to type is their name and the passphrase.</p>
+        <button class="btn-ghost" data-action="copy-setup-link">Copy Setup Link</button>
+        <p class="tiny">The link carries the sheet address only &mdash; never the passphrase. Tell them that separately, and not in the same message.</p>
+      </div>` : ''}
+
     <div class="card">
       <h2>Who can sign in</h2>
       <p class="muted">One name per line. Anyone on this list can sign in on this device by typing their name.</p>
@@ -1392,6 +1400,17 @@ const ACTIONS = {
     sync.syncInBackground(refreshIfIdle);
   },
 
+  'copy-setup-link': async () => {
+    const link = sync.setupLink();
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      go('settings', { notice: 'Setup link copied. Send the passphrase separately.' });
+    } catch (err) {
+      go('settings', { notice: `Copy this: ${link}` });
+    }
+  },
+
   'lock-device': () => {
     if (!confirm('Forget the passphrase on this phone? You will need it again to sign in.')) return;
     sync.lock();
@@ -1656,6 +1675,10 @@ function loadActiveRound() {
 
 function init() {
   document.body.addEventListener('click', onClick);
+
+  // A setup link points this device at the sheet before anything else
+  // runs, so the first login already knows to ask for the passphrase.
+  sync.applySetupLink();
 
   STATE.player = store.getPlayer();
   if (STATE.player) {
