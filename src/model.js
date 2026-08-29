@@ -15,6 +15,8 @@ import {
   CATEGORIES,
 } from './baseline.js';
 
+export { unitForLie };
+
 export function newRound({ player, courseId, courseName, teeName, layout, holes }) {
   return {
     id: 'r_' + Date.now().toString(36),
@@ -66,6 +68,41 @@ export function newShot({
     penalty,
     miss,
   };
+}
+
+/**
+ * Rebuild each shot's starting point from the previous shot's finish.
+ *
+ * A shot stores where it started as well as where it ended, which
+ * makes every other calculation simple but means editing shot 3 leaves
+ * shot 4 claiming to have started somewhere the ball no longer was.
+ * Call this after any edit or deletion and the chain is consistent
+ * again — including the shot numbering and whether the hole is done.
+ */
+export function relinkHole(hole) {
+  let lie = 'tee';
+  let dist = hole.yards;
+
+  hole.shots.forEach((shot, index) => {
+    shot.n = index + 1;
+    shot.startLie = lie;
+    shot.startDist = dist;
+    shot.startUnit = unitForLie(lie);
+
+    if (shot.holed) {
+      shot.endLie = null;
+      shot.endDist = null;
+      shot.endUnit = null;
+    } else {
+      shot.endUnit = unitForLie(shot.endLie);
+      lie = shot.endLie;
+      dist = shot.endDist;
+    }
+  });
+
+  const last = hole.shots[hole.shots.length - 1];
+  hole.done = Boolean(last && last.holed);
+  return hole;
 }
 
 /** Where the next shot on this hole starts from. */

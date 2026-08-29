@@ -12,6 +12,7 @@ const PREFIX = 'ledger:';
 const KEYS = {
   player: PREFIX + 'player',
   roster: PREFIX + 'roster',
+  prefs: PREFIX + 'prefs',
   activeRound: PREFIX + 'active_round',
   rounds: PREFIX + 'rounds',
   courses: PREFIX + 'courses',
@@ -80,6 +81,29 @@ export function matchPlayer(name) {
   const wanted = String(name || '').trim().toLowerCase();
   if (!wanted) return null;
   return getRoster().find((n) => n.toLowerCase() === wanted) || null;
+}
+
+/* --- Preferences ------------------------------------------------- */
+
+export function getPrefs() {
+  return read(KEYS.prefs, {}) || {};
+}
+
+export function setPref(key, value) {
+  const prefs = getPrefs();
+  prefs[key] = value;
+  write(KEYS.prefs, prefs);
+}
+
+/** Distance buttons instead of the keypad. Off by default — a
+ *  rangefinder gives an exact number, and typing it is fine. */
+export function usePresets() {
+  return getPrefs().presets === true;
+}
+
+/** 'auto' follows the phone, otherwise 'light' or 'dark'. */
+export function getTheme() {
+  return getPrefs().theme || 'auto';
 }
 
 /* --- Active round ----------------------------------------------- */

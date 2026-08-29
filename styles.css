@@ -22,6 +22,60 @@
   --tap: 46px;
 }
 
+/* Dark palette. Only the tokens change — every rule below is written
+   against them, so nothing else needs a dark variant. The greens stay
+   green and the flag stays red; they are lifted for contrast against a
+   dark ground rather than swapped for different hues. */
+:root[data-theme="dark"] {
+  --cream: #141816;
+  --paper: #1c2220;
+  --ink: #e8eae7;
+  --ink-soft: #a3aeaa;
+  --ink-faint: #78837f;
+  --green-deep: #d3e2d7;
+  --green-mid: #7fc39b;
+  --green-line: #35423c;
+  --flag: #e8785a;
+  --flag-soft: #6b3527;
+  --flag-wash: #2e1c17;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+/* The top bar is the one place the deep green is a background rather
+   than a foreground, so it needs its own treatment once inverted. */
+:root[data-theme="dark"] .topbar {
+  background: #0e1412;
+  color: var(--ink);
+}
+:root[data-theme="dark"] .badge,
+:root[data-theme="dark"] .chip.active,
+:root[data-theme="dark"] .par-toggle button.active {
+  background: var(--green-mid);
+  border-color: var(--green-mid);
+  color: #101512;
+}
+:root[data-theme="dark"] .btn-primary {
+  background: var(--green-mid);
+  color: #101512;
+}
+:root[data-theme="dark"] .miss-cell.active {
+  background: var(--green-mid);
+  border-color: var(--green-mid);
+  color: #101512;
+}
+:root[data-theme="dark"] .ok-box {
+  background: #16241b;
+}
+:root[data-theme="dark"] .fairway-divider {
+  background: repeating-linear-gradient(
+    90deg, var(--green-mid) 0 18px, var(--green-line) 18px 36px
+  );
+}
+:root[data-theme="dark"] .stat-box {
+  background: #232a27;
+}
+:root[data-theme="dark"] .stat-box .val { color: var(--ink); }
+
 * { box-sizing: border-box; }
 
 html, body { margin: 0; padding: 0; }

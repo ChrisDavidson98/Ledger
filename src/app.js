@@ -34,6 +34,7 @@ import {
   playedHoles,
   isRoundComplete,
   nextUnplayedHole,
+  relinkHole,
   approachBuckets,
   puttingBuckets,
   teeOutcomes,
@@ -87,6 +88,8 @@ const STATE = {
   importPreview: null,
   importCourse: null,
   historyScope: 'mine',
+  holePicker: false,
+  editShotIdx: null,
   syncBusy: false,
   syncStatus: null,
   notice: null,
@@ -340,11 +343,21 @@ function screenPlay() {
   const round = STATE.round;
   if (!round) return screenHome();
   const hole = round.holes[STATE.holeIdx];
-  const start = lieAfter(hole);
+  const editing = STATE.editShotIdx != null && hole.shots[STATE.editShotIdx];
   const played = playedHoles(round).length;
   const pct = Math.round((played / round.holes.length) * 100);
 
-  const shotNum = hole.shots.length + 1;
+  // When editing, the form describes the shot being changed rather
+  // than the next one to be played.
+  const start = editing
+    ? {
+      lie: hole.shots[STATE.editShotIdx].startLie,
+      dist: hole.shots[STATE.editShotIdx].startDist,
+      unit: hole.shots[STATE.editShotIdx].startUnit,
+    }
+    : lieAfter(hole);
+
+  const shotNum = editing ? STATE.editShotIdx + 1 : hole.shots.length + 1;
   const category = classifyShot({
     shotNum,
     par: hole.par,
@@ -357,7 +370,8 @@ function screenPlay() {
     ${notices()}
     <div class="card">
       <div class="progress">
-        <span class="mono muted">Hole ${hole.hole}/${round.holes.length}</span>
+        <button class="mono muted" data-action="toggle-hole-picker"
+                style="background:none;border:none;padding:0;min-height:0;text-decoration:underline;font-size:13px">Hole ${hole.hole}/${round.holes.length}</button>
         <div class="track"><div class="fill" style="width:${pct}%"></div></div>
         <span class="mono muted">${fmtToPar(roundToPar(round))}</span>
       </div>
@@ -371,21 +385,26 @@ function screenPlay() {
       </div>
     </div>
 
+    ${STATE.holePicker ? renderHolePicker(round) : ''}
+
     ${hole.shots.length ? `
       <div class="card">
         <div class="split"><h3>Shots</h3>
           <button class="chip" data-action="undo-shot" style="min-height:36px;padding:6px 12px">Undo last</button>
         </div>
-        ${hole.shots.map((s) => renderShotLine(s, hole)).join('')}
+        <p class="tiny">Tap a shot to change or remove it. Everything after it re-links itself.</p>
+        ${hole.shots.map((s, i) => renderShotLine(s, hole, i)).join('')}
       </div>` : ''}
 
-    ${hole.done ? renderHoleComplete(hole) : renderShotForm(hole, start, category, shotNum)}
+    ${STATE.editShotIdx != null
+      ? renderShotForm(hole, start, category, shotNum)
+      : hole.done ? renderHoleComplete(hole) : renderShotForm(hole, start, category, shotNum)}
 
     ${played > 0 && !hole.done ? `
       <button class="btn-ghost" data-action="end-round">End Round Here</button>` : ''}`;
 }
 
-function renderShotLine(shot, hole) {
+function renderShotLine(shot, hole, index) {
   const { category, sg } = shotSG(shot, hole.par);
   const from = `${LIE_LABELS[shot.startLie]} ${fmtDist(shot.startDist, shot.startUnit)}`;
   const to = shot.holed
@@ -394,17 +413,71 @@ function renderShotLine(shot, hole) {
   const extras = [];
   if (shot.miss && shot.miss !== 'target') extras.push(MISS_LABELS[shot.miss]);
   if (shot.penalty) extras.push(`+${shot.penalty} pen`);
-  return `<div class="shot-line">
+  const editing = STATE.editShotIdx === index;
+
+  return `<button class="shot-line" data-edit-shot="${index}"
+    style="width:100%;border:none;border-radius:0;background:${editing ? 'var(--cream)' : 'none'};text-align:left;min-height:0">
     <span class="desc">
       <strong class="mono">${shot.n}</strong>&nbsp; ${esc(from)} &rarr; ${esc(to)}
       <span class="tiny">${CATEGORY_SHORT[category]}${extras.length ? ' &middot; ' + esc(extras.join(' · ')) : ''}</span>
     </span>
     <span class="mono ${sgClass(sg)}">${fmtSG(sg)}</span>
+  </button>`;
+}
+
+/**
+ * Jump to any hole, finished or not. Getting back to a hole you
+ * mis-entered was previously impossible without unwinding everything
+ * after it.
+ */
+function renderHolePicker(round) {
+  return `<div class="card">
+    <div class="split">
+      <h3>Jump to a hole</h3>
+      <button class="chip" data-action="toggle-hole-picker" style="min-height:36px;padding:6px 12px">Close</button>
+    </div>
+    <div class="chip-grid" style="grid-template-columns:repeat(6,1fr)">
+      ${round.holes.map((h, i) => {
+        const score = holeScore(h);
+        const played = h.shots.length > 0;
+        return `<button class="chip ${i === STATE.holeIdx ? 'active' : ''}" data-goto-hole="${i}"
+          style="flex-direction:column;gap:0;padding:6px 2px">
+          ${h.hole}
+          <span class="tiny" style="${i === STATE.holeIdx ? 'color:var(--cream)' : ''}">${
+            played ? fmtToPar(score - h.par) : '·'
+          }</span>
+        </button>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+/** Common yardages and putt lengths, for entry without a keypad. */
+const YARD_PRESETS = [
+  [20, 30, 40, 50, 60, 70],
+  [80, 90, 100, 110, 120, 130],
+  [140, 150, 160, 170, 180, 190],
+  [200, 215, 230, 250, 275, 300],
+];
+const FOOT_PRESETS = [
+  [1, 2, 3, 4, 5, 6],
+  [8, 10, 12, 15, 18, 20],
+  [25, 30, 35, 40, 50, 60],
+];
+
+function renderPresets(unit, current) {
+  const rows = unit === 'ft' ? FOOT_PRESETS : YARD_PRESETS;
+  return `<div class="chip-grid" style="grid-template-columns:repeat(6,1fr);gap:6px">
+    ${rows.flat().map((value) => `
+      <button class="chip ${String(current) === String(value) ? 'active' : ''}"
+              data-preset="${value}" style="padding:8px 0;font-size:13px;min-height:40px">${value}</button>
+    `).join('')}
   </div>`;
 }
 
 function renderShotForm(hole, start, category, shotNum) {
   const draft = STATE.draft;
+  const editing = STATE.editShotIdx != null;
   const endLie = draft.endLie;
   const unit = endLie && endLie !== 'holed' ? unitForLie(endLie) : null;
   const needsDist = endLie && endLie !== 'holed';
@@ -414,10 +487,11 @@ function renderShotForm(hole, start, category, shotNum) {
 
   return `<div class="card">
     <div class="split">
-      <h2>Shot ${shotNum}</h2>
+      <h2>${editing ? `Edit shot ${shotNum}` : `Shot ${shotNum}`}</h2>
       <span class="tiny">${CATEGORY_LABELS[category]}</span>
     </div>
     <p class="muted">From ${esc(startLabel)}.</p>
+    ${editing ? `<p class="tiny">Changing this re-links every later shot on the hole.</p>` : ''}
 
     <label>Where did it finish?</label>
     <div class="chip-grid">
@@ -431,6 +505,7 @@ function renderShotForm(hole, start, category, shotNum) {
       <label>Distance left to the hole (${unit === 'ft' ? 'feet' : 'yards'})</label>
       <input type="number" inputmode="decimal" id="distInput" class="big-number-input"
              placeholder="${unit === 'ft' ? '18' : '120'}" value="${draft.endDist == null ? '' : esc(draft.endDist)}">
+      ${store.usePresets() ? renderPresets(unit, draft.endDist) : ''}
     ` : ''}
 
     ${tracksMiss(category) ? `
@@ -450,8 +525,13 @@ function renderShotForm(hole, start, category, shotNum) {
     </div>
 
     <button class="btn-flag" style="margin-top:14px" id="saveShot" data-action="save-shot" ${ready ? '' : 'disabled'}>
-      Save Shot
+      ${editing ? 'Update Shot' : 'Save Shot'}
     </button>
+    ${editing ? `
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="cancel-edit">Cancel</button>
+        <button class="btn-danger" data-action="delete-shot">Delete Shot</button>
+      </div>` : ''}
   </div>`;
 }
 
@@ -621,6 +701,23 @@ function screenSettings() {
         <button class="btn-ghost" data-action="copy-setup-link">Copy Setup Link</button>
         <p class="tiny">The link carries the sheet address only &mdash; never the passphrase. Tell them that separately, and not in the same message.</p>
       </div>` : ''}
+
+    <div class="card">
+      <h2>Appearance</h2>
+      <div class="chip-grid">
+        ${[['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']].map(([key, label]) => `
+          <button class="chip ${store.getTheme() === key ? 'active' : ''}" data-set-theme="${key}">${label}</button>
+        `).join('')}
+      </div>
+      <p class="tiny">Auto follows your phone's setting.</p>
+
+      <label>Distance entry</label>
+      <div class="chip-grid g2">
+        <button class="chip ${store.usePresets() ? '' : 'active'}" data-presets="off">Keypad</button>
+        <button class="chip ${store.usePresets() ? 'active' : ''}" data-presets="on">Buttons</button>
+      </div>
+      <p class="tiny">Buttons add common yardages and putt lengths under the keypad, for when you are pacing off a sprinkler head rather than reading a rangefinder. The keypad stays either way.</p>
+    </div>
 
     <div class="card">
       <h2>Who can sign in</h2>
@@ -1258,12 +1355,16 @@ function go(screen, extra = {}) {
 
 function saveShot() {
   const hole = STATE.round.holes[STATE.holeIdx];
-  const start = lieAfter(hole);
+  const editIdx = STATE.editShotIdx;
+  const editing = editIdx != null;
+  const start = editing
+    ? { lie: hole.shots[editIdx].startLie, dist: hole.shots[editIdx].startDist }
+    : lieAfter(hole);
   const draft = STATE.draft;
   const holed = draft.endLie === 'holed';
 
   const shot = newShot({
-    shotNum: hole.shots.length + 1,
+    shotNum: editing ? editIdx + 1 : hole.shots.length + 1,
     startLie: start.lie,
     startDist: Number(start.dist),
     endLie: holed ? null : draft.endLie,
@@ -1273,11 +1374,45 @@ function saveShot() {
     miss: draft.miss || null,
   });
 
-  hole.shots.push(shot);
-  if (holed) hole.done = true;
+  if (editing) {
+    hole.shots[editIdx] = shot;
+    // Holing out mid-hole ends it; anything logged after is void.
+    if (holed) hole.shots.length = editIdx + 1;
+    STATE.editShotIdx = null;
+  } else {
+    hole.shots.push(shot);
+  }
 
+  relinkHole(hole);
   STATE.draft = {};
   store.saveActiveRound(STATE.round);
+  render();
+}
+
+function deleteShot() {
+  const hole = STATE.round.holes[STATE.holeIdx];
+  const idx = STATE.editShotIdx;
+  if (idx == null) return;
+  hole.shots.splice(idx, 1);
+  relinkHole(hole);
+  STATE.editShotIdx = null;
+  STATE.draft = {};
+  store.saveActiveRound(STATE.round);
+  render();
+}
+
+/** Load an existing shot back into the form for editing. */
+function beginEditShot(index) {
+  const hole = STATE.round.holes[STATE.holeIdx];
+  const shot = hole.shots[index];
+  if (!shot) return;
+  STATE.editShotIdx = index;
+  STATE.draft = {
+    endLie: shot.holed ? 'holed' : shot.endLie,
+    endDist: shot.holed ? null : shot.endDist,
+    penalty: shot.penalty || 0,
+    miss: shot.miss || null,
+  };
   render();
 }
 
@@ -1560,6 +1695,9 @@ const ACTIONS = {
   }),
   'start-round': (el) => startRound(el.getAttribute('data-option')),
   'save-shot': saveShot,
+  'delete-shot': deleteShot,
+  'cancel-edit': () => { STATE.editShotIdx = null; STATE.draft = {}; render(); },
+  'toggle-hole-picker': () => { STATE.holePicker = !STATE.holePicker; render(); },
   'undo-shot': undoShot,
   'next-hole': nextHole,
   'end-round': () => {
@@ -1715,7 +1853,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-set-theme],[data-presets]');
   if (!target) return;
 
   const verified = target.getAttribute('data-verified');
@@ -1723,6 +1861,31 @@ function onClick(event) {
     STATE.courseDraft.verified = verified === 'yes';
     return render();
   }
+
+  const editShot = target.getAttribute('data-edit-shot');
+  if (editShot !== null) return beginEditShot(Number(editShot));
+
+  const gotoHole = target.getAttribute('data-goto-hole');
+  if (gotoHole !== null) {
+    STATE.holeIdx = Number(gotoHole);
+    STATE.holePicker = false;
+    STATE.editShotIdx = null;
+    STATE.draft = {};
+    store.saveActiveRound(STATE.round);
+    return render();
+  }
+
+  const preset = target.getAttribute('data-preset');
+  if (preset !== null) {
+    STATE.draft.endDist = preset;
+    return render();
+  }
+
+  const theme = target.getAttribute('data-set-theme');
+  if (theme) { store.setPref('theme', theme); applyTheme(); return render(); }
+
+  const presets = target.getAttribute('data-presets');
+  if (presets) { store.setPref('presets', presets === 'on'); return render(); }
 
   const scope = target.getAttribute('data-scope');
   if (scope) {
@@ -1806,7 +1969,22 @@ function loadActiveRound() {
   }
 }
 
+/** Paint the chosen theme, or follow the phone when set to auto. */
+function applyTheme() {
+  const choice = store.getTheme();
+  const dark = choice === 'dark'
+    || (choice === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', dark ? '#0e1412' : '#173b2e');
+}
+
 function init() {
+  applyTheme();
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (store.getTheme() === 'auto') applyTheme();
+  });
+
   document.body.addEventListener('click', onClick);
 
   // A setup link points this device at the sheet before anything else
