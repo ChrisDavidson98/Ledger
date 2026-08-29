@@ -35,6 +35,9 @@ import {
   isRoundComplete,
   nextUnplayedHole,
   approachBuckets,
+  puttingBuckets,
+  teeOutcomes,
+  greensInRegulation,
   missTally,
 } from './model.js';
 
@@ -42,6 +45,7 @@ import * as store from './storage.js';
 import * as sync from './sync.js';
 import { missingSeeds, cloneSeed } from './seed.js';
 import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js';
+import { handicapProfile, fmtHandicap, upsideFor } from './handicap.js';
 
 import {
   newCourse,
@@ -719,7 +723,91 @@ function screenStats() {
   const teeMiss = missTally(rounds, 'ott');
   const appMiss = missTally(rounds, 'app');
 
+  const profile = handicapProfile({ ...avg, total: avgTotal });
+  const gir = greensInRegulation(rounds);
+  const tee = teeOutcomes(rounds);
+  const putts = puttingBuckets(rounds);
+
   return `${topbar(`${STATE.player} · Stats`)}
+    <div class="card">
+      <h2>You play like a ${fmtHandicap(profile.overall)}</h2>
+      <p class="muted">Across ${rounds.length} round${rounds.length === 1 ? '' : 's'}, ${holesPlayed} holes. Each part of your game translated to the handicap that normally plays it that well.</p>
+      <div class="card-editor">
+        <div class="hdr" style="grid-template-columns:1fr 56px 62px 58px">
+          <span>Part of the game</span>
+          <span style="text-align:center">SG/18</span>
+          <span style="text-align:center">Plays like</span>
+          <span style="text-align:center">Upside</span>
+        </div>
+        ${profile.rows.map((row) => `
+          <div class="line" style="grid-template-columns:1fr 56px 62px 58px">
+            <span>
+              <strong>${CATEGORY_LABELS[row.category]}</strong>
+              <span class="tiny">${
+                row.gapToOverall < -1 ? 'holding you back'
+                : row.gapToOverall > 1 ? 'ahead of the rest'
+                : 'in line with the rest'
+              }</span>
+            </span>
+            <span class="mono ${sgClass(row.sg)}" style="text-align:center;font-size:12px">${fmtSG(row.sg)}</span>
+            <span class="mono" style="text-align:center;font-size:13px;font-weight:700;color:${
+              row.gapToOverall < -1 ? 'var(--flag)' : row.gapToOverall > 1 ? 'var(--green-mid)' : 'var(--ink-soft)'
+            }">${fmtHandicap(row.handicap)}</span>
+            <span class="mono tiny" style="text-align:center">${
+              upsideFor(row) >= 0.1 ? '−' + upsideFor(row).toFixed(1) : '—'
+            }</span>
+          </div>`).join('')}
+      </div>
+      <p class="tiny" style="margin-top:10px">
+        <strong>Upside</strong> is the strokes per 18 you would save by lifting that part of the game to the level of the rest &mdash; not to scratch, just to your own standard.
+        ${profile.weakest && profile.weakest.gapToOverall < -1
+          ? ` Right now that is <strong>${CATEGORY_LABELS[profile.weakest.category]}</strong>, worth about ${upsideFor(profile.weakest).toFixed(1)} shots.`
+          : ' Your game is fairly even across the board.'}
+      </p>
+      <p class="tiny">The handicap conversion is a model, not a measurement. It is anchored on scoring, which is solid; the split between categories is approximate. Good for spotting the weak spot, not for arguing over a decimal.</p>
+    </div>
+
+    <div class="card">
+      <h2>The basics</h2>
+      <div class="stat-grid g4">
+        <div class="stat-box"><div class="val">${gir.pct}%</div><div class="lbl">Greens</div></div>
+        <div class="stat-box"><div class="val">${tee.fairwayPct}%</div><div class="lbl">Fairways</div></div>
+        <div class="stat-box"><div class="val">${(rounds.reduce((s, r) => s + roundScore(r), 0) / rounds.length).toFixed(1)}</div><div class="lbl">Avg score</div></div>
+        <div class="stat-box"><div class="val">${(putts.reduce((s, b) => s + b.putts, 0) / holesPlayed * 18).toFixed(1)}</div><div class="lbl">Putts/18</div></div>
+      </div>
+    </div>
+
+    ${tee.total ? `
+      <div class="card">
+        <h2>Off the tee</h2>
+        <p class="muted">Where your tee shots on par 4s and 5s finished, and what each outcome cost.</p>
+        ${tee.rows.map((row) => `
+          <div class="row">
+            <div class="badge" style="font-size:12px">${Math.round((row.count / tee.total) * 100)}%</div>
+            <div class="row-meta">
+              <div class="rname">${LIE_LABELS[row.lie] || esc(row.lie)}</div>
+              <div class="rsub">${row.count} of ${tee.total} tee shots</div>
+            </div>
+            <div class="row-val ${sgClass(row.sg / row.count)}">${fmtSG(row.sg / row.count)}</div>
+          </div>`).join('')}
+        <p class="tiny" style="margin-top:8px">Per-shot average. A miss that costs little is not the miss to fix.</p>
+      </div>` : ''}
+
+    ${putts.length ? `
+      <div class="card">
+        <h2>Putting</h2>
+        <p class="muted">Make rate and strokes gained by distance.</p>
+        ${putts.map((b) => `
+          <div class="row">
+            <div class="badge" style="font-size:11px">${esc(b.label)}</div>
+            <div class="row-meta">
+              <div class="rname">${b.putts} putt${b.putts === 1 ? '' : 's'} &middot; ${Math.round((b.holed / b.putts) * 100)}% holed</div>
+              <div class="rsub">${b.threePutts ? `${b.threePutts} three-putt${b.threePutts === 1 ? '' : 's'} from here` : 'no three-putts from here'}</div>
+            </div>
+            <div class="row-val ${sgClass(b.sg / b.putts)}">${fmtSG(b.sg / b.putts)}</div>
+          </div>`).join('')}
+      </div>` : ''}
+
     <div class="card">
       <h2>Average per 18 holes</h2>
       <p class="muted">Across ${rounds.length} round${rounds.length === 1 ? '' : 's'}${nineCount ? ` (${nineCount} of them nine holes)` : ''}, ${holesPlayed} holes in all.</p>

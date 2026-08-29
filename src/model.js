@@ -198,6 +198,111 @@ export function approachBuckets(rounds, baseline = 'tour') {
   return buckets.filter((b) => b.shots > 0);
 }
 
+/** Every shot across a set of rounds, tagged with its category. */
+function eachShot(rounds, baseline, visit) {
+  rounds.forEach((round) => {
+    round.holes.forEach((hole) => {
+      hole.shots.forEach((shot) => {
+        const { category, sg } = shotSG(shot, hole.par, baseline);
+        visit(shot, hole, category, sg, round);
+      });
+    });
+  });
+}
+
+/**
+ * Putting by distance. `holed` is the make rate, which is the number
+ * golfers actually recognise, and `threePutts` counts holes where
+ * putting from this bucket took three or more.
+ */
+export function puttingBuckets(rounds, baseline = 'tour') {
+  const bounds = [
+    [0, 3], [3, 6], [6, 10], [10, 20], [20, 30], [30, Infinity],
+  ];
+  const buckets = bounds.map(([lo, hi]) => ({
+    lo,
+    hi,
+    label: hi === Infinity ? `${lo}ft+` : `${lo}-${hi}ft`,
+    putts: 0,
+    holed: 0,
+    sg: 0,
+    firstPutts: 0,
+    threePutts: 0,
+  }));
+
+  const find = (feet) => buckets.find((b) => feet >= b.lo && feet < b.hi);
+
+  rounds.forEach((round) => {
+    round.holes.forEach((hole) => {
+      const putts = hole.shots.filter((s) => s.startLie === 'green');
+      putts.forEach((shot, index) => {
+        const bucket = find(shot.startDist);
+        if (!bucket) return;
+        const { sg } = shotSG(shot, hole.par, baseline);
+        bucket.putts += 1;
+        bucket.sg += sg;
+        if (shot.holed) bucket.holed += 1;
+        if (index === 0) {
+          bucket.firstPutts += 1;
+          if (putts.length >= 3) bucket.threePutts += 1;
+        }
+      });
+    });
+  });
+
+  return buckets.filter((b) => b.putts > 0);
+}
+
+/**
+ * Tee shots on par 4s and 5s, by where they finished. Fairways hit is
+ * the familiar number; the strokes gained column is the one that says
+ * whether a miss actually cost anything.
+ */
+export function teeOutcomes(rounds, baseline = 'tour') {
+  const outcomes = {};
+  let total = 0;
+  let sgTotal = 0;
+
+  eachShot(rounds, baseline, (shot, hole, category, sg) => {
+    if (category !== 'ott') return;
+    const lie = shot.holed ? 'green' : shot.endLie;
+    if (!outcomes[lie]) outcomes[lie] = { lie, count: 0, sg: 0 };
+    outcomes[lie].count += 1;
+    outcomes[lie].sg += sg;
+    total += 1;
+    sgTotal += sg;
+  });
+
+  const rows = Object.values(outcomes).sort((a, b) => b.count - a.count);
+  const fairways = outcomes.fairway ? outcomes.fairway.count : 0;
+  return {
+    rows,
+    total,
+    sgTotal,
+    fairwayPct: total ? Math.round((fairways / total) * 100) : 0,
+  };
+}
+
+/** Greens in regulation: on the putting surface in par minus two. */
+export function greensInRegulation(rounds) {
+  let greens = 0;
+  let holes = 0;
+
+  rounds.forEach((round) => {
+    playedHoles(round).forEach((hole) => {
+      holes += 1;
+      const allowed = hole.par - 2;
+      const shot = hole.shots[allowed - 1];
+      if (!shot) return;
+      // Holing out counts, and so does being on the green in regulation.
+      if (shot.holed || shot.endLie === 'green') greens += 1;
+      else if (hole.shots.slice(0, allowed).some((s) => s.holed)) greens += 1;
+    });
+  });
+
+  return { greens, holes, pct: holes ? Math.round((greens / holes) * 100) : 0 };
+}
+
 /** Tally of miss directions for one category across rounds. */
 export function missTally(rounds, category, baseline = 'tour') {
   const tally = {};
