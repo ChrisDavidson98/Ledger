@@ -1,0 +1,441 @@
+/* ---------------------------------------------------------------
+   Ledger — visual system.
+   Cream paper, deep fairway green, flagstick red. Slab headings
+   against a clean sans, mono for every number so figures line up
+   in columns. Tap targets sized for a phone held in one hand.
+--------------------------------------------------------------- */
+
+:root {
+  --cream: #f6f3ea;
+  --paper: #fffefb;
+  --ink: #1e2621;
+  --ink-soft: #5b6660;
+  --ink-faint: #8b9590;
+  --green-deep: #173b2e;
+  --green-mid: #3e6b57;
+  --green-line: #b9c9bc;
+  --flag: #a8391f;
+  --flag-soft: #e7c9bc;
+  --flag-wash: #fbebe6;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(23, 59, 46, 0.08), 0 4px 14px rgba(23, 59, 46, 0.06);
+  --tap: 46px;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  background: var(--cream);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  padding-bottom: 88px;
+  overscroll-behavior-y: contain;
+}
+
+h1, h2, h3, .display {
+  font-family: "Zilla Slab", Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--green-deep);
+  margin: 0;
+}
+
+.mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+#app { max-width: 540px; margin: 0 auto; padding: 0 16px; }
+
+/* --- Top bar ---------------------------------------------------- */
+
+.topbar {
+  padding: 20px 16px 14px;
+  background: var(--green-deep);
+  color: var(--cream);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 3px solid var(--flag);
+}
+.topbar .brand {
+  font-family: "Zilla Slab", serif;
+  font-size: 22px;
+  font-weight: 700;
+}
+.topbar .brand span { color: var(--flag-soft); }
+.topbar .sub {
+  font-size: 11px;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  text-align: right;
+}
+
+/* --- Cards ------------------------------------------------------ */
+
+.card {
+  background: var(--paper);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px;
+  margin: 14px 0;
+  border: 1px solid rgba(23, 59, 46, 0.06);
+}
+.card h2 { font-size: 19px; margin-bottom: 10px; }
+.card h3 { font-size: 15px; margin-bottom: 8px; }
+.muted { color: var(--ink-soft); font-size: 13px; line-height: 1.55; }
+.tiny { font-size: 12px; color: var(--ink-faint); }
+
+.fairway-divider {
+  height: 6px;
+  margin: 4px 0 16px;
+  background: repeating-linear-gradient(
+    90deg, var(--green-mid) 0 18px, var(--green-deep) 18px 36px
+  );
+  border-radius: 3px;
+  opacity: 0.5;
+}
+
+/* --- Buttons ---------------------------------------------------- */
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  transition: transform 0.08s ease, opacity 0.15s ease;
+  min-height: var(--tap);
+}
+button:active { transform: scale(0.97); }
+
+.btn-primary {
+  background: var(--green-deep);
+  color: var(--cream);
+  padding: 13px 20px;
+  width: 100%;
+}
+.btn-flag {
+  background: var(--flag);
+  color: #fff;
+  padding: 13px 20px;
+  width: 100%;
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--green-deep);
+  border: 1.5px solid var(--green-line);
+  padding: 11px 16px;
+  width: 100%;
+}
+.btn-danger {
+  background: transparent;
+  color: var(--flag);
+  border: 1.5px solid var(--flag-soft);
+  padding: 11px 16px;
+  width: 100%;
+}
+button:disabled { opacity: 0.35; cursor: not-allowed; }
+button:disabled:active { transform: none; }
+
+.btn-row { display: flex; gap: 10px; margin-top: 10px; }
+.btn-row button { flex: 1; }
+
+/* --- Chips ------------------------------------------------------ */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 6px;
+  border-radius: 9px;
+  border: 1.5px solid var(--green-line);
+  background: var(--paper);
+  color: var(--green-deep);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: var(--tap);
+}
+.chip.active {
+  background: var(--green-deep);
+  color: var(--cream);
+  border-color: var(--green-deep);
+}
+.chip.flag.active {
+  background: var(--flag);
+  border-color: var(--flag);
+  color: #fff;
+}
+.chip-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0; }
+.chip-grid.g2 { grid-template-columns: repeat(2, 1fr); }
+
+/* --- Miss direction grid ---------------------------------------- */
+
+.miss-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 8px 0;
+  max-width: 264px;
+}
+.miss-cell {
+  aspect-ratio: 1;
+  border-radius: 9px;
+  border: 1.5px solid var(--green-line);
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 2px;
+  text-align: center;
+  line-height: 1.15;
+}
+.miss-cell.center {
+  border-color: var(--green-mid);
+  color: var(--green-mid);
+  border-style: dashed;
+}
+.miss-cell.active {
+  background: var(--green-deep);
+  border-color: var(--green-deep);
+  color: var(--cream);
+}
+.miss-cell.center.active {
+  background: var(--green-mid);
+  border-color: var(--green-mid);
+  border-style: solid;
+}
+
+/* --- Forms ------------------------------------------------------ */
+
+input[type="text"],
+input[type="number"],
+input[type="password"],
+select {
+  width: 100%;
+  padding: 12px;
+  border-radius: 9px;
+  border: 1.5px solid var(--green-line);
+  background: var(--paper);
+  font-family: inherit;
+  font-size: 16px; /* 16px keeps iOS from zooming the page on focus */
+  color: var(--ink);
+  min-height: var(--tap);
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--green-mid);
+}
+label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: block;
+  margin: 12px 0 5px;
+}
+
+.big-number-input {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 26px !important;
+  font-weight: 600;
+  text-align: center;
+  padding: 14px 12px;
+}
+
+/* --- Bottom nav ------------------------------------------------- */
+
+.navbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--paper);
+  border-top: 1px solid var(--green-line);
+  display: flex;
+  justify-content: space-around;
+  padding: 6px 0 max(6px, env(safe-area-inset-bottom));
+  z-index: 10;
+}
+.navbtn {
+  background: none;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 18px;
+}
+.navbtn.active { color: var(--flag); }
+.navbtn .dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
+.navbtn.active .dot { background: var(--flag); }
+
+/* --- Rows ------------------------------------------------------- */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border: none;
+  border-bottom: 1px dashed var(--green-line);
+  width: 100%;
+  background: none;
+  text-align: left;
+  border-radius: 0;
+}
+.row:last-child { border-bottom: none; }
+.badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--green-deep);
+  color: var(--cream);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Zilla Slab", serif;
+  font-weight: 700;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.row-meta { flex: 1; min-width: 0; }
+.row-meta .rname { font-weight: 600; font-size: 14px; color: var(--ink); }
+.row-meta .rsub { font-size: 12px; color: var(--ink-soft); }
+.row-val { font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 14px; }
+
+.sg-pos { color: var(--green-mid); }
+.sg-neg { color: var(--flag); }
+.sg-zero { color: var(--ink-soft); }
+
+/* --- Stats ------------------------------------------------------ */
+
+.stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 8px; }
+.stat-grid.g4 { grid-template-columns: repeat(4, 1fr); }
+.stat-box { background: var(--cream); border-radius: 10px; padding: 12px 8px; text-align: center; }
+.stat-box .val {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--green-deep);
+}
+.stat-box .lbl {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin-top: 3px;
+}
+
+.shot-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--cream);
+  font-size: 13px;
+}
+.shot-line:last-child { border-bottom: none; }
+.shot-line .desc { flex: 1; min-width: 0; }
+
+.progress { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.progress .track {
+  flex: 1;
+  height: 4px;
+  background: var(--green-line);
+  border-radius: 2px;
+  margin: 0 10px;
+  overflow: hidden;
+}
+.progress .fill { height: 100%; background: var(--flag); transition: width 0.2s ease; }
+
+.empty { text-align: center; padding: 34px 10px; color: var(--ink-soft); font-size: 14px; }
+.empty .glyph { font-size: 32px; margin-bottom: 8px; }
+
+.err-box {
+  background: var(--flag-wash);
+  border: 1px solid var(--flag-soft);
+  color: var(--flag);
+  padding: 10px 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  margin: 8px 0;
+}
+.ok-box {
+  background: #eaf1ec;
+  border: 1px solid var(--green-line);
+  color: var(--green-deep);
+  padding: 10px 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+/* --- Scorecard editor ------------------------------------------- */
+
+.card-editor .hdr,
+.card-editor .line {
+  display: grid;
+  grid-template-columns: 30px 1fr 84px;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+}
+.card-editor .hdr {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--green-line);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+}
+.card-editor .line { border-bottom: 1px solid var(--cream); }
+.card-editor .hno {
+  font-family: "IBM Plex Mono", monospace;
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+.par-toggle { display: flex; gap: 4px; }
+.par-toggle button {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 13px;
+  border-radius: 7px;
+  border: 1.5px solid var(--green-line);
+  background: var(--paper);
+  color: var(--ink-soft);
+  min-height: 38px;
+}
+.par-toggle button.active {
+  background: var(--green-deep);
+  border-color: var(--green-deep);
+  color: var(--cream);
+}
+.card-editor input {
+  padding: 7px 8px;
+  font-size: 15px;
+  min-height: 38px;
+  text-align: center;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.tee-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.tee-tabs .chip { padding: 8px 12px; min-height: 40px; font-size: 13px; }
+
+.split { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.stack > * + * { margin-top: 10px; }
