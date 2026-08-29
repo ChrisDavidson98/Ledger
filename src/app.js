@@ -89,6 +89,7 @@ const STATE = {
   importCourse: null,
   historyScope: 'mine',
   holePicker: false,
+  openHole: null,
   editShotIdx: null,
   syncBusy: false,
   syncStatus: null,
@@ -587,21 +588,82 @@ function roundReport(round) {
         <div class="tiny">vs. tour baseline</div>
       </div>
     </div>
+    ${renderRoundBreakdown(round)}
+
     <div class="card">
       <h2>Hole by hole</h2>
+      <p class="muted">Tap a hole to see the shots.</p>
       ${holes.map((h) => {
         const t = holeTotals(h);
         const s = holeScore(h);
-        return `<div class="row">
-          <div class="badge">${h.hole}</div>
-          <div class="row-meta">
-            <div class="rname">${s} on par ${h.par} <span class="tiny">(${fmtToPar(s - h.par)})</span></div>
-            <div class="rsub">${h.yards}y &middot; ${h.shots.length} shots</div>
-          </div>
-          <div class="row-val ${sgClass(t.total)}">${fmtSG(t.total)}</div>
-        </div>`;
+        const open = STATE.openHole === h.hole;
+        return `<button class="row" data-open-hole="${h.hole}" style="border-radius:0;background:${open ? 'var(--cream)' : 'none'}">
+            <div class="badge">${h.hole}</div>
+            <div class="row-meta">
+              <div class="rname">${s} on par ${h.par} <span class="tiny">(${fmtToPar(s - h.par)})</span></div>
+              <div class="rsub">${h.yards}y &middot; ${h.shots.length} shots${
+                h.sourceNine && h.sourceHole !== h.hole ? ` &middot; ${esc(h.sourceNine)} ${h.sourceHole}` : ''
+              }</div>
+            </div>
+            <div class="row-val ${sgClass(t.total)}">${fmtSG(t.total)}</div>
+          </button>
+          ${open ? `<div style="padding:4px 0 12px 52px">
+            ${h.shots.map((s2) => {
+              const { category, sg } = shotSG(s2, h.par);
+              const to = s2.holed ? 'holed' : `${LIE_LABELS[s2.endLie]} ${fmtDist(s2.endDist, s2.endUnit)}`;
+              return `<div class="shot-line" style="padding:5px 0">
+                <span class="desc tiny">${s2.n}. ${LIE_LABELS[s2.startLie]} ${fmtDist(s2.startDist, s2.startUnit)} &rarr; ${esc(to)}
+                  ${s2.miss && s2.miss !== 'target' ? `&middot; ${esc(MISS_LABELS[s2.miss])}` : ''}
+                  ${s2.penalty ? `&middot; +${s2.penalty} pen` : ''}</span>
+                <span class="mono ${sgClass(sg)}" style="font-size:12px">${CATEGORY_SHORT[category]} ${fmtSG(sg)}</span>
+              </div>`;
+            }).join('')}
+          </div>` : ''}`;
       }).join('')}
     </div>`;
+}
+
+/**
+ * The same analysis the Stats tab gives, scoped to one round. Useful
+ * for "where did this one go wrong" rather than "what is my game".
+ */
+function renderRoundBreakdown(round) {
+  const rounds = [round];
+  const holes = playedHoles(round);
+  const gir = greensInRegulation(rounds);
+  const tee = teeOutcomes(rounds);
+  const putts = puttingBuckets(rounds);
+  const buckets = approachBuckets(rounds);
+  const totalPutts = putts.reduce((s, b) => s + b.putts, 0);
+  const totals = roundTotals(round);
+
+  // Which hole cost the most, and which part of the game it was.
+  const worstHole = holes.reduce((worst, h) => {
+    const t = holeTotals(h).total;
+    return worst === null || t < holeTotals(worst).total ? h : worst;
+  }, null);
+  const worstCategory = CATEGORIES.reduce((a, b) => (totals[a] <= totals[b] ? a : b));
+
+  return `<div class="card">
+      <h2>This round</h2>
+      <div class="stat-grid g4">
+        <div class="stat-box"><div class="val">${gir.pct}%</div><div class="lbl">Greens</div></div>
+        <div class="stat-box"><div class="val">${tee.fairwayPct}%</div><div class="lbl">Fairways</div></div>
+        <div class="stat-box"><div class="val">${totalPutts}</div><div class="lbl">Putts</div></div>
+        <div class="stat-box"><div class="val">${holes.length}</div><div class="lbl">Holes</div></div>
+      </div>
+      <p class="tiny" style="margin-top:10px">
+        ${CATEGORY_LABELS[worstCategory]} cost the most at ${fmtSG(totals[worstCategory])}${
+          worstHole ? `, and hole ${worstHole.hole} was the single worst at ${fmtSG(holeTotals(worstHole).total)}` : ''
+        }.
+      </p>
+    </div>
+
+    ${renderTeeCard(tee)}
+    ${renderApproachCard(buckets)}
+    ${renderPuttingCard(putts)}
+    ${renderMissCard('Tee shot misses', missTally(rounds, 'ott'))}
+    ${renderMissCard('Approach misses', missTally(rounds, 'app'))}`;
 }
 
 function screenHistory() {
@@ -874,36 +936,8 @@ function screenStats() {
       </div>
     </div>
 
-    ${tee.total ? `
-      <div class="card">
-        <h2>Off the tee</h2>
-        <p class="muted">Where your tee shots on par 4s and 5s finished, and what each outcome cost.</p>
-        ${tee.rows.map((row) => `
-          <div class="row">
-            <div class="badge" style="font-size:12px">${Math.round((row.count / tee.total) * 100)}%</div>
-            <div class="row-meta">
-              <div class="rname">${LIE_LABELS[row.lie] || esc(row.lie)}</div>
-              <div class="rsub">${row.count} of ${tee.total} tee shots</div>
-            </div>
-            <div class="row-val ${sgClass(row.sg / row.count)}">${fmtSG(row.sg / row.count)}</div>
-          </div>`).join('')}
-        <p class="tiny" style="margin-top:8px">Per-shot average. A miss that costs little is not the miss to fix.</p>
-      </div>` : ''}
-
-    ${putts.length ? `
-      <div class="card">
-        <h2>Putting</h2>
-        <p class="muted">Make rate and strokes gained by distance.</p>
-        ${putts.map((b) => `
-          <div class="row">
-            <div class="badge" style="font-size:11px">${esc(b.label)}</div>
-            <div class="row-meta">
-              <div class="rname">${b.putts} putt${b.putts === 1 ? '' : 's'} &middot; ${Math.round((b.holed / b.putts) * 100)}% holed</div>
-              <div class="rsub">${b.threePutts ? `${b.threePutts} three-putt${b.threePutts === 1 ? '' : 's'} from here` : 'no three-putts from here'}</div>
-            </div>
-            <div class="row-val ${sgClass(b.sg / b.putts)}">${fmtSG(b.sg / b.putts)}</div>
-          </div>`).join('')}
-      </div>` : ''}
+    ${renderTeeCard(tee)}
+    ${renderPuttingCard(putts)}
 
     <div class="card">
       <h2>Average per 18 holes</h2>
@@ -922,23 +956,7 @@ function screenStats() {
       <p class="tiny" style="margin-top:10px">Measured against a tour baseline, so negatives are expected. What matters is which column is furthest from the others.</p>
     </div>
 
-    ${buckets.length ? `
-      <div class="card">
-        <h2>Approach play</h2>
-        <p class="muted">Strokes gained and average proximity by distance.</p>
-        ${buckets.map((b) => `
-          <div class="row">
-            <div class="badge" style="font-size:11px">${esc(b.label)}</div>
-            <div class="row-meta">
-              <div class="rname">${b.shots} shot${b.shots === 1 ? '' : 's'}</div>
-              <div class="rsub">${b.proximityCount
-                ? 'Avg ' + Math.round(b.proximitySum / b.proximityCount) + 'ft when on'
-                : 'never finished on the green'}</div>
-            </div>
-            <div class="row-val ${sgClass(b.sg / b.shots)}">${fmtSG(b.sg / b.shots)}</div>
-          </div>`).join('')}
-        <p class="tiny" style="margin-top:8px">Per-shot average. The bucket costing you most per swing is where practice pays.</p>
-      </div>` : ''}
+    ${renderApproachCard(buckets)}
 
     ${renderMissCard('Tee shot misses', teeMiss)}
     ${renderMissCard('Approach misses', appMiss)}
@@ -999,23 +1017,137 @@ function renderComparison() {
   </div>`;
 }
 
-function renderMissCard(title, { tally, total }) {
+/* --- Shared stat cards -------------------------------------------
+   These take an already-computed result rather than a set of rounds,
+   so the same card serves the career view on Stats and the single
+   round view on a round's detail page.
+------------------------------------------------------------------ */
+
+function renderTeeCard(tee) {
+  if (!tee.total) return '';
+  return `<div class="card">
+    <h2>Off the tee</h2>
+    <p class="muted">Where tee shots on par 4s and 5s finished, and what each outcome cost.</p>
+    ${tee.rows.map((row) => `
+      <div class="row">
+        <div class="badge" style="font-size:12px">${Math.round((row.count / tee.total) * 100)}%</div>
+        <div class="row-meta">
+          <div class="rname">${LIE_LABELS[row.lie] || esc(row.lie)}</div>
+          <div class="rsub">${row.count} of ${tee.total} tee shots</div>
+        </div>
+        <div class="row-val ${sgClass(row.sg / row.count)}">${fmtSG(row.sg / row.count)}</div>
+      </div>`).join('')}
+    <p class="tiny" style="margin-top:8px">Per-shot average. A miss that costs little is not the miss to fix.</p>
+  </div>`;
+}
+
+function renderPuttingCard(putts) {
+  if (!putts.length) return '';
+  return `<div class="card">
+    <h2>Putting</h2>
+    <p class="muted">Make rate and strokes gained by distance.</p>
+    ${putts.map((b) => `
+      <div class="row">
+        <div class="badge" style="font-size:11px">${esc(b.label)}</div>
+        <div class="row-meta">
+          <div class="rname">${b.putts} putt${b.putts === 1 ? '' : 's'} &middot; ${Math.round((b.holed / b.putts) * 100)}% holed</div>
+          <div class="rsub">${b.threePutts ? `${b.threePutts} three-putt${b.threePutts === 1 ? '' : 's'} from here` : 'no three-putts from here'}</div>
+        </div>
+        <div class="row-val ${sgClass(b.sg / b.putts)}">${fmtSG(b.sg / b.putts)}</div>
+      </div>`).join('')}
+  </div>`;
+}
+
+function renderApproachCard(buckets) {
+  if (!buckets.length) return '';
+  return `<div class="card">
+    <h2>Approach play</h2>
+    <p class="muted">Strokes gained and average proximity by distance.</p>
+    ${buckets.map((b) => `
+      <div class="row">
+        <div class="badge" style="font-size:11px">${esc(b.label)}</div>
+        <div class="row-meta">
+          <div class="rname">${b.shots} shot${b.shots === 1 ? '' : 's'}</div>
+          <div class="rsub">${b.proximityCount
+            ? 'Avg ' + Math.round(b.proximitySum / b.proximityCount) + 'ft when on'
+            : 'never finished on the green'}</div>
+        </div>
+        <div class="row-val ${sgClass(b.sg / b.shots)}">${fmtSG(b.sg / b.shots)}</div>
+      </div>`).join('')}
+    <p class="tiny" style="margin-top:8px">Per-shot average. The bucket costing most per swing is where practice pays.</p>
+  </div>`;
+}
+
+/**
+ * The miss grid, with the read-out beside it rather than empty space.
+ * The grid answers "where does it go"; the panel answers "does it
+ * matter", which is the part strokes gained can actually settle.
+ */
+function renderMissCard(title, stats) {
+  const { tally, total } = stats;
   if (!total) return '';
+
   const cells = MISS_GRID.flat().map((dir) => {
     const count = tally[dir] || 0;
     const share = total ? Math.round((count / total) * 100) : 0;
     const strength = count ? Math.min(0.14 + (count / total) * 1.1, 1) : 0;
     const style = count
-      ? `background:rgba(23,59,46,${strength.toFixed(2)});color:${strength > 0.5 ? 'var(--cream)' : 'var(--ink)'};border-color:var(--green-deep)`
+      ? `background:rgba(62,107,87,${strength.toFixed(2)});border-color:var(--green-mid)`
       : '';
-    return `<div class="miss-cell ${dir === 'target' ? 'center' : ''}" style="${style}">
+    return `<div class="miss-cell ${dir === 'target' ? 'center' : ''}" style="${style}"
+      title="${esc(MISS_LABELS[dir])}">
       ${count ? `<span><strong class="mono">${count}</strong><br><span class="tiny">${share}%</span></span>` : '&middot;'}
     </div>`;
   }).join('');
+
+  const bias = (a, b, aLabel, bLabel) => {
+    if (!a && !b) return null;
+    if (a === b) return `even ${aLabel}/${bLabel}`;
+    const total2 = a + b;
+    const dominant = a > b ? aLabel : bLabel;
+    const pct = Math.round((Math.max(a, b) / total2) * 100);
+    return pct >= 70 ? `${pct}% ${dominant}` : `${pct}% ${dominant}, two-way`;
+  };
+
+  const sideways = bias(stats.leftCount, stats.rightCount, 'left', 'right');
+  const depth = bias(stats.shortCount, stats.longCount, 'short', 'long');
+
   return `<div class="card">
     <h2>${esc(title)}</h2>
-    <p class="muted">${total} logged. Center is on target.</p>
-    <div class="miss-grid">${cells}</div>
+    <p class="muted">${total} logged. Centre is on target; darker means more often.</p>
+    <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+      <div class="miss-grid" style="flex:0 0 auto;margin:0;width:190px">${cells}</div>
+      <div style="flex:1 1 150px;min-width:140px">
+        <div class="shot-line" style="padding:6px 0">
+          <span class="desc tiny">On target</span>
+          <span class="mono" style="font-size:13px;font-weight:700">${stats.onTargetPct}%</span>
+        </div>
+        ${sideways ? `<div class="shot-line" style="padding:6px 0">
+          <span class="desc tiny">Side miss</span>
+          <span class="tiny" style="font-weight:600">${esc(sideways)}</span>
+        </div>` : ''}
+        ${depth ? `<div class="shot-line" style="padding:6px 0">
+          <span class="desc tiny">Distance</span>
+          <span class="tiny" style="font-weight:600">${esc(depth)}</span>
+        </div>` : ''}
+        ${stats.avgOnTarget != null ? `<div class="shot-line" style="padding:6px 0">
+          <span class="desc tiny">On target costs</span>
+          <span class="mono ${sgClass(stats.avgOnTarget)}" style="font-size:12px">${fmtSG(stats.avgOnTarget)}</span>
+        </div>` : ''}
+        ${stats.avgMiss != null ? `<div class="shot-line" style="padding:6px 0">
+          <span class="desc tiny">A miss costs</span>
+          <span class="mono ${sgClass(stats.avgMiss)}" style="font-size:12px">${fmtSG(stats.avgMiss)}</span>
+        </div>` : ''}
+        ${stats.worst && stats.worstAvg != null ? `<div class="shot-line" style="padding:6px 0;border-bottom:none">
+          <span class="desc tiny">Worst: ${esc(MISS_LABELS[stats.worst])}</span>
+          <span class="mono ${sgClass(stats.worstAvg)}" style="font-size:12px">${fmtSG(stats.worstAvg)}</span>
+        </div>` : ''}
+      </div>
+    </div>
+    ${stats.avgOnTarget != null && stats.avgMiss != null ? `
+      <p class="tiny" style="margin-top:8px">Missing costs you ${Math.abs(stats.avgOnTarget - stats.avgMiss).toFixed(2)} shots more than finding the target${
+        sideways && sideways.includes('two-way') ? ', and the side miss goes both ways — that is a swing pattern rather than an aim adjustment' : ''
+      }.</p>` : ''}
   </div>`;
 }
 
@@ -1853,12 +1985,19 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-set-theme],[data-presets]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-set-theme],[data-presets],[data-open-hole]');
   if (!target) return;
 
   const verified = target.getAttribute('data-verified');
   if (verified !== null) {
     STATE.courseDraft.verified = verified === 'yes';
+    return render();
+  }
+
+  const openHole = target.getAttribute('data-open-hole');
+  if (openHole !== null) {
+    const n = Number(openHole);
+    STATE.openHole = STATE.openHole === n ? null : n;
     return render();
   }
 

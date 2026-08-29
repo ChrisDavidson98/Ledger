@@ -105,7 +105,12 @@ h1, h2, h3, .display {
 /* --- Top bar ---------------------------------------------------- */
 
 .topbar {
-  padding: 20px 16px 14px;
+  /* The home-screen app draws under the status bar, so the brand and
+     the player name were sitting behind the clock and the battery.
+     Push the bar down by whatever the notch actually needs. */
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 16px 14px;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
   background: var(--green-deep);
   color: var(--cream);
   display: flex;

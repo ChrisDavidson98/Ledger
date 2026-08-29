@@ -340,20 +340,63 @@ export function greensInRegulation(rounds) {
   return { greens, holes, pct: holes ? Math.round((greens / holes) * 100) : 0 };
 }
 
-/** Tally of miss directions for one category across rounds. */
+/**
+ * Miss directions for one category, with what each one costs.
+ *
+ * The count alone says where the ball goes; the strokes gained per
+ * direction says whether it matters. A miss you make often but which
+ * costs nothing is not the miss to fix.
+ */
 export function missTally(rounds, category, baseline = 'tour') {
   const tally = {};
+  const sgByDir = {};
   let total = 0;
+  let onTarget = 0;
+  let onTargetSG = 0;
+  let missSG = 0;
+
   rounds.forEach((round) => {
     round.holes.forEach((hole) => {
       hole.shots.forEach((shot) => {
         if (!shot.miss) return;
-        const { category: cat } = shotSG(shot, hole.par, baseline);
+        const { category: cat, sg } = shotSG(shot, hole.par, baseline);
         if (cat !== category) return;
         tally[shot.miss] = (tally[shot.miss] || 0) + 1;
+        sgByDir[shot.miss] = (sgByDir[shot.miss] || 0) + sg;
         total += 1;
+        if (shot.miss === 'target') {
+          onTarget += 1;
+          onTargetSG += sg;
+        } else {
+          missSG += sg;
+        }
       });
     });
   });
-  return { tally, total };
+
+  // The direction costing the most in total, ignoring on-target shots.
+  let worst = null;
+  Object.keys(sgByDir).forEach((dir) => {
+    if (dir === 'target') return;
+    if (!worst || sgByDir[dir] < sgByDir[worst]) worst = dir;
+  });
+
+  const missCount = total - onTarget;
+  return {
+    tally,
+    sgByDir,
+    total,
+    onTarget,
+    onTargetPct: total ? Math.round((onTarget / total) * 100) : 0,
+    avgOnTarget: onTarget ? onTargetSG / onTarget : null,
+    avgMiss: missCount ? missSG / missCount : null,
+    worst,
+    worstCount: worst ? tally[worst] : 0,
+    worstAvg: worst ? sgByDir[worst] / tally[worst] : null,
+    // A one-sided miss is an aim problem; a two-way miss is not.
+    leftCount: ['left', 'long-left', 'short-left'].reduce((s, d) => s + (tally[d] || 0), 0),
+    rightCount: ['right', 'long-right', 'short-right'].reduce((s, d) => s + (tally[d] || 0), 0),
+    shortCount: ['short', 'short-left', 'short-right'].reduce((s, d) => s + (tally[d] || 0), 0),
+    longCount: ['long', 'long-left', 'long-right'].reduce((s, d) => s + (tally[d] || 0), 0),
+  };
 }
