@@ -311,7 +311,7 @@ export function flattenRound(round) {
         shot_num: 0,
         start_lie: '', start_dist: '', start_unit: '',
         end_lie: '', end_dist: '', end_unit: '',
-        holed: '', penalty: 0, miss: '', category: 'score', sg: '',
+        holed: '', penalty: 0, miss: '', club: '', category: 'score', sg: '',
       });
       return;
     }
@@ -328,6 +328,7 @@ export function flattenRound(round) {
         end_dist: shot.endDist == null ? '' : shot.endDist,
         end_unit: shot.endUnit || '',
         holed: yn(shot.holed),
+        club: shot.club || '',
         penalty: shot.penalty || 0,
         miss: shot.miss || '',
         category,
@@ -385,6 +386,7 @@ export function rebuildRound(summaryRow, shotRows) {
         endUnit: holed ? null : String(row.end_unit),
         holed,
         penalty: Number(row.penalty) || 0,
+        club: row.club ? String(row.club) : null,
         miss: row.miss ? String(row.miss) : null,
       });
       if (holed) hole.done = true;

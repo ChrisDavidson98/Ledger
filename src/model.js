@@ -13,6 +13,7 @@ import {
   classifyShot,
   unitForLie,
   CATEGORIES,
+  CLUBS,
 } from './baseline.js';
 
 export { unitForLie };
@@ -76,6 +77,7 @@ export function newShot({
   holed,
   penalty = 0,
   miss = null,
+  club = null,
 }) {
   return {
     n: shotNum,
@@ -88,7 +90,53 @@ export function newShot({
     holed: !!holed,
     penalty,
     miss,
+    club,
   };
+}
+
+/**
+ * How far each club actually goes, from approach shots that stayed in
+ * play. Distance advanced, not carry — the same caveat as a drive,
+ * though an approach is aimed at the green rather than round a corner,
+ * so the two are much closer together.
+ */
+export function clubDistances(rounds, baseline = 'tour') {
+  const byClub = new Map();
+
+  sgRounds(rounds).forEach((round) => {
+    round.holes.forEach((hole) => {
+      hole.shots.forEach((shot) => {
+        if (!shot.club || shot.penalty) return;
+        if (shot.startUnit !== 'y') return;
+        const { category } = shotSG(shot, hole.par, baseline);
+        if (category !== 'app' && category !== 'ott') return;
+
+        const endYards = shot.holed ? 0
+          : shot.endUnit === 'ft' ? shot.endDist / 3 : shot.endDist;
+        const travelled = shot.startDist - endYards;
+        if (!(travelled > 0)) return;
+
+        if (!byClub.has(shot.club)) byClub.set(shot.club, { club: shot.club, distances: [] });
+        byClub.get(shot.club).distances.push(travelled);
+      });
+    });
+  });
+
+  const order = new Map(CLUBS.map((c, i) => [c, i]));
+  return [...byClub.values()].map((entry) => {
+    const sorted = entry.distances.slice().sort((a, b) => a - b);
+    const sum = sorted.reduce((s, v) => s + v, 0);
+    return {
+      club: entry.club,
+      shots: sorted.length,
+      avg: sum / sorted.length,
+      shortest: sorted[0],
+      longest: sorted[sorted.length - 1],
+      // The middle of the pack, which is closer to "what you can
+      // count on" than an average a single thin one drags down.
+      typical: sorted[Math.floor(sorted.length / 2)],
+    };
+  }).sort((a, b) => (order.get(a.club) ?? 99) - (order.get(b.club) ?? 99));
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   CATEGORY_SHORT,
   MISS_GRID,
   MISS_LABELS,
+  CLUBS,
   classifyShot,
   unitForLie,
   tracksMiss,
@@ -45,6 +46,7 @@ import {
   personalBests,
   playerSummary,
   nemesisHoles,
+  clubDistances,
   holeRecords,
   missTally,
 } from './model.js';
@@ -604,6 +606,16 @@ function renderShotForm(hole, start, category, shotNum) {
       ${store.usePresets() ? renderPresets(unit, draft.endDist) : ''}
     ` : ''}
 
+    ${store.trackClubs() && category === 'app' ? `
+      <label>Club <span class="tiny" style="text-transform:none;letter-spacing:0">optional</span></label>
+      <div class="chip-grid" style="grid-template-columns:repeat(5,1fr);gap:6px">
+        ${CLUBS.map((club) => `
+          <button class="chip ${draft.club === club ? 'active' : ''}" data-club="${club}"
+                  style="padding:8px 0;font-size:12px;min-height:40px">${club}</button>
+        `).join('')}
+      </div>
+    ` : ''}
+
     ${tracksMiss(category) ? `
       <label>Where did you miss? <span class="tiny" style="text-transform:none;letter-spacing:0">optional</span></label>
       <div class="miss-grid">
@@ -918,6 +930,13 @@ function screenSettings() {
         <button class="chip ${store.usePresets() ? 'active' : ''}" data-presets="on">Buttons</button>
       </div>
       <p class="tiny">Buttons add common yardages and putt lengths under the keypad, for when you are pacing off a sprinkler head rather than reading a rangefinder. The keypad stays either way.</p>
+
+      <label>Club on approaches</label>
+      <div class="chip-grid g2">
+        <button class="chip ${store.trackClubs() ? '' : 'active'}" data-clubs="off">Off</button>
+        <button class="chip ${store.trackClubs() ? 'active' : ''}" data-clubs="on">Track</button>
+      </div>
+      <p class="tiny">Adds one optional tap on approach shots only &mdash; not tee shots, chips or putts. Enough to learn what each iron really goes without tripling the taps for answers you already know.</p>
     </div>
 
     ${sync.isConfigured() ? `
@@ -1134,6 +1153,7 @@ function screenStats() {
 
     ${renderMissCard('Tee shot misses', teeMiss)}
     ${renderMissCard('Approach misses', appMiss)}
+    ${renderClubCard(clubDistances(rounds))}
     ${renderNemesisCard(rounds)}
     ${renderBestsCard(personalBests(rounds), allRounds)}
     ${renderComparison()}`;
@@ -1391,6 +1411,34 @@ function renderHandicapCard(profile, { subtitle, caveat } = {}) {
         : ' Fairly even across the board.'}
     </p>
     <p class="tiny">${caveat || 'The handicap conversion is a model, not a measurement. It is anchored on scoring, which is solid; the split between categories is approximate. Good for spotting the weak spot, not for arguing over a decimal.'}</p>
+  </div>`;
+}
+
+/** What each club actually goes, once there is enough of it to say. */
+function renderClubCard(clubs) {
+  if (!clubs.length) return '';
+  const widest = Math.max(...clubs.map((c) => c.longest));
+
+  return `<div class="card">
+    <h2>Your clubs</h2>
+    <p class="muted">Distance advanced on approach shots, by club. The bar shows the spread from your shortest to your longest.</p>
+    ${clubs.map((c) => {
+      const left = (c.shortest / widest) * 100;
+      const width = Math.max(((c.longest - c.shortest) / widest) * 100, 1.5);
+      const mid = (c.typical / widest) * 100;
+      return `<div class="row" style="${thinStyle(c.shots)}">
+        <div class="badge" style="font-size:12px">${esc(c.club)}</div>
+        <div class="row-meta">
+          <div class="rname">${Math.round(c.typical)}y typical${thinMark(c.shots)}</div>
+          <div style="position:relative;height:8px;margin-top:5px;background:var(--cream);border-radius:4px">
+            <div style="position:absolute;left:${left}%;width:${width}%;top:0;bottom:0;background:var(--green-line);border-radius:4px"></div>
+            <div style="position:absolute;left:calc(${mid}% - 2px);top:-2px;width:4px;height:12px;background:var(--flag);border-radius:2px"></div>
+          </div>
+          <div class="rsub" style="margin-top:3px">${Math.round(c.shortest)}&ndash;${Math.round(c.longest)}y &middot; ${c.shots} shot${c.shots === 1 ? '' : 's'}</div>
+        </div>
+      </div>`;
+    }).join('')}
+    <p class="tiny" style="margin-top:8px">Typical is the middle of your shots, not the average &mdash; one thinned 7-iron should not shorten the club. Gaps or overlaps between clubs are the useful part.</p>
   </div>`;
 }
 
@@ -2160,6 +2208,7 @@ function saveShot() {
     holed,
     penalty: Number(draft.penalty || 0),
     miss: draft.miss || null,
+    club: draft.club || null,
   });
 
   if (editing) {
@@ -2200,6 +2249,7 @@ function beginEditShot(index) {
     endDist: shot.holed ? null : shot.endDist,
     penalty: shot.penalty || 0,
     miss: shot.miss || null,
+    club: shot.club || null,
   };
   render();
 }
@@ -2709,7 +2759,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-set-theme],[data-presets],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step]');
   if (!target) return;
 
   const verified = target.getAttribute('data-verified');
@@ -2741,6 +2791,12 @@ function onClick(event) {
     return render();
   }
 
+  const club = target.getAttribute('data-club');
+  if (club) {
+    STATE.draft.club = STATE.draft.club === club ? null : club;
+    return render();
+  }
+
   const preset = target.getAttribute('data-preset');
   if (preset !== null) {
     STATE.draft.endDist = preset;
@@ -2749,6 +2805,9 @@ function onClick(event) {
 
   const theme = target.getAttribute('data-set-theme');
   if (theme) { store.setPref('theme', theme); applyTheme(); return render(); }
+
+  const clubsPref = target.getAttribute('data-clubs');
+  if (clubsPref) { store.setPref('clubs', clubsPref === 'on'); return render(); }
 
   const presets = target.getAttribute('data-presets');
   if (presets) { store.setPref('presets', presets === 'on'); return render(); }

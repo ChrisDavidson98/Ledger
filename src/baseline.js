@@ -146,6 +146,20 @@ export const MISS_LABELS = {
   'short-right': 'Short R',
 };
 
+/**
+ * Clubs offered on approach shots, longest first.
+ *
+ * Approach only, and optional. Logging a club on every tee shot, chip
+ * and putt would roughly triple the taps for an answer nobody needs —
+ * you know what you hit off the tee. The question worth answering is
+ * how far each iron actually goes, and that lives on approaches.
+ */
+export const CLUBS = [
+  '3W', '5W', 'Hyb', '2i', '3i',
+  '4i', '5i', '6i', '7i', '8i',
+  '9i', 'PW', 'GW', 'SW', 'LW',
+];
+
 /** True when a shot is one worth asking miss direction for. */
 export function tracksMiss(category) {
   return category === 'ott' || category === 'app';

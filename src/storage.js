@@ -98,6 +98,10 @@ export function setPref(key, value) {
 
 /** Distance buttons instead of the keypad. Off by default — a
  *  rangefinder gives an exact number, and typing it is fine. */
+export function trackClubs() {
+  return getPrefs().clubs === true;
+}
+
 export function usePresets() {
   return getPrefs().presets === true;
 }

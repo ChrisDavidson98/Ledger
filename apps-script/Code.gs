@@ -31,7 +31,7 @@ var SHEETS = {
     'hole', 'par', 'hole_yards', 'hole_score', 'shot_num',
     'start_lie', 'start_dist', 'start_unit',
     'end_lie', 'end_dist', 'end_unit',
-    'holed', 'penalty', 'miss', 'category', 'sg',
+    'holed', 'penalty', 'miss', 'club', 'category', 'sg',
   ],
   // One row per hole per tee per nine. A course is a facility made of
   // nines, so the nine is part of the key, not the 18-hole block.
@@ -60,7 +60,7 @@ SHEETS.shots_archive = SHEETS.shots.slice();
  * "that phone is pointed at an older deployment" is otherwise
  * invisible from the client.
  */
-var CONTRACT = 5;
+var CONTRACT = 6;
 
 function doGet(e) {
   return respond({
