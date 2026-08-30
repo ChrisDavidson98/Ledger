@@ -41,6 +41,15 @@ var SHEETS = {
   ],
 };
 
+/*
+ * Deleting moves rows here rather than dropping them. Nothing reads
+ * these tabs, so archived rounds stay out of the app and out of any
+ * pivot built on `rounds` or `shots` — but the data is still sitting
+ * there if a delete turns out to have been a mistake.
+ */
+SHEETS.rounds_archive = SHEETS.rounds.concat(['deleted_at']);
+SHEETS.shots_archive = SHEETS.shots.slice();
+
 /* --- Entry points ------------------------------------------------ */
 
 function doGet(e) {
@@ -73,6 +82,8 @@ function doPost(e) {
       case 'setup':        return respond(setupSheets());
       case 'pushRounds':   return respond(pushRounds(body.rounds || []));
       case 'deleteRounds': return respond(deleteRounds(body.ids || []));
+      case 'listArchive':  return respond(listArchive());
+      case 'restoreRounds':return respond(restoreRounds(body.ids || []));
       case 'pullRounds':   return respond(pullRounds(body.since || null));
       case 'pushCourses':  return respond(pushCourses(body.courses || []));
       case 'pullCourses':  return respond(pullCourses());
@@ -278,16 +289,75 @@ function pushRounds(rounds) {
   return { ok: true, written: summaryRows.length, shots: shotRows.length };
 }
 
+/** Rows matching `ids`, as objects keyed by header name. */
+function rowsFor(name, column, ids) {
+  var wanted = {};
+  ids.forEach(function (v) { wanted[String(v)] = true; });
+  return readAll(name).filter(function (row) { return wanted[String(row[column])]; });
+}
+
+/** Append without disturbing what is already there. */
+function appendRows(name, rows) {
+  if (!rows.length) return;
+  var sheet = sheetFor(name);
+  var matrix = toMatrix(name, rows);
+  sheet.getRange(sheet.getLastRow() + 1, 1, matrix.length, SHEETS[name].length)
+    .setValues(matrix);
+}
+
 /**
- * Remove rounds entirely. Without this a round deleted on a phone
- * came straight back on the next pull, since the sheet still had it
- * and the sheet is what everyone reads from.
+ * Deleting a round moves it to the archive tabs rather than dropping
+ * it. Without any removal at all a deleted round came back on the next
+ * pull, since the sheet is what everyone reads from — but a hard
+ * delete is the wrong default for the one copy of the data that lives
+ * anywhere but a phone.
  */
 function deleteRounds(ids) {
   if (!ids.length) return { ok: true, deleted: 0 };
+
+  var now = new Date().toISOString();
+  var summaries = rowsFor('rounds', 'round_id', ids).map(function (row) {
+    row.deleted_at = now;
+    return row;
+  });
+  var shots = rowsFor('shots', 'round_id', ids);
+
+  appendRows('rounds_archive', summaries);
+  appendRows('shots_archive', shots);
+
   replaceRows('rounds', 'round_id', ids, []);
   replaceRows('shots', 'round_id', ids, []);
-  return { ok: true, deleted: ids.length };
+
+  return { ok: true, deleted: summaries.length, archivedShots: shots.length };
+}
+
+/** Everything sitting in the archive, newest deletion first. */
+function listArchive() {
+  var rows = readAll('rounds_archive').sort(function (a, b) {
+    return String(b.deleted_at).localeCompare(String(a.deleted_at));
+  });
+  return { ok: true, rounds: rows };
+}
+
+/** Move rounds back out of the archive and into play. */
+function restoreRounds(ids) {
+  if (!ids.length) return { ok: true, restored: 0 };
+
+  var summaries = rowsFor('rounds_archive', 'round_id', ids).map(function (row) {
+    delete row.deleted_at;
+    return row;
+  });
+  var shots = rowsFor('shots_archive', 'round_id', ids);
+  if (!summaries.length) return { ok: true, restored: 0 };
+
+  // Replace rather than append, so restoring twice cannot duplicate.
+  replaceRows('rounds', 'round_id', ids, summaries);
+  replaceRows('shots', 'round_id', ids, shots);
+
+  replaceRows('rounds_archive', 'round_id', ids, []);
+  replaceRows('shots_archive', 'round_id', ids, []);
+
+  return { ok: true, restored: summaries.length };
 }
 
 /** Raw shot rows, so the client can rebuild rounds and recompute SG itself. */

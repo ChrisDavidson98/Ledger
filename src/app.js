@@ -96,6 +96,7 @@ const STATE = {
   holePicker: false,
   openHole: null,
   trendKey: 'total',
+  archive: null,
   editShotIdx: null,
   syncBusy: false,
   syncStatus: null,
@@ -898,6 +899,29 @@ function screenSettings() {
       </div>
       <p class="tiny">Buttons add common yardages and putt lengths under the keypad, for when you are pacing off a sprinkler head rather than reading a rangefinder. The keypad stays either way.</p>
     </div>
+
+    ${sync.isConfigured() ? `
+      <div class="card">
+        <div class="split">
+          <h2>Deleted rounds</h2>
+          <span class="tiny">kept on the sheet</span>
+        </div>
+        <p class="muted">Deleting moves a round out of the way rather than destroying it. Anything here can come back.</p>
+        ${STATE.archive === null ? `
+          <button class="btn-ghost" data-action="load-archive" ${STATE.syncBusy ? 'disabled' : ''}>Show Deleted Rounds</button>
+        ` : STATE.archive.length === 0 ? `
+          <div class="empty" style="padding:18px"><div>Nothing deleted.</div></div>
+        ` : STATE.archive.map((r) => `
+          <div class="row">
+            <div class="badge">${fmtToPar(r.toPar)}</div>
+            <div class="row-meta">
+              <div class="rname">${esc(r.courseName)} <span class="tiny">${esc(r.player)}</span></div>
+              <div class="rsub">${fmtDate(r.date)} &middot; ${r.score} strokes${r.mode === 'score' ? ' &middot; score only' : ''}</div>
+            </div>
+            <button class="chip" data-action="restore-round" data-id="${esc(r.id)}"
+                    style="min-height:38px;padding:0 14px">Restore</button>
+          </div>`).join('')}
+      </div>` : ''}
 
     <div class="card">
       <h2>Who can sign in</h2>
@@ -2076,7 +2100,7 @@ async function runSync(label, operation) {
 }
 
 const ACTIONS = {
-  'goto-settings': () => go('settings', { syncDraft: null }),
+  'goto-settings': () => go('settings', { syncDraft: null, archive: null }),
 
   'save-sync-config': () => {
     const draft = syncDraft();
@@ -2109,6 +2133,22 @@ const ACTIONS = {
     if (result.deleted) bits.push(`removed ${result.deleted}`);
     return bits.join(', ') + ` round${result.pulled === 1 && result.pushed === 1 ? '' : 's'}.`;
   }),
+
+  'load-archive': () => runSync('Loading deleted rounds', async () => {
+    STATE.archive = await sync.listArchive();
+    return STATE.archive.length
+      ? `${STATE.archive.length} deleted round${STATE.archive.length === 1 ? '' : 's'} on the sheet.`
+      : 'Nothing has been deleted.';
+  }),
+
+  'restore-round': (el) => {
+    const id = el.getAttribute('data-id');
+    runSync('Restore', async () => {
+      await sync.restoreRound(id);
+      STATE.archive = await sync.listArchive();
+      return 'Round restored.';
+    });
+  },
 
   'push-all': () => runSync('Push', async () => {
     const result = await sync.pushAll();

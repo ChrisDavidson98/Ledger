@@ -384,6 +384,30 @@ export async function pushDeletions() {
   return { deleted: ids.length };
 }
 
+/** Rounds sitting in the sheet's archive, newest deletion first. */
+export async function listArchive() {
+  const data = await post('listArchive');
+  return (data.rounds || []).map((row) => ({
+    id: String(row.round_id),
+    player: String(row.player),
+    courseName: String(row.course_name),
+    teeName: String(row.tee_name),
+    mode: String(row.mode || 'full'),
+    score: Number(row.score) || 0,
+    toPar: Number(row.to_par) || 0,
+    holes: Number(row.holes_played) || 0,
+    date: row.date,
+    deletedAt: row.deleted_at,
+  }));
+}
+
+/** Put an archived round back, then pull it down again. */
+export async function restoreRound(id) {
+  await post('restoreRounds', { ids: [id] });
+  store.clearDeletion(id);
+  await pullRounds({ full: true });
+}
+
 /**
  * Re-send every stored round, whether or not it is queued. Needed
  * when the row format changes: rounds already marked synced are
