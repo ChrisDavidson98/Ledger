@@ -432,6 +432,7 @@ export function trendSeries(rounds, baseline = 'tour') {
 export function personalBests(rounds, baseline = 'tour') {
   const best = {
     longestDrive: null,
+    longestFairwayDrive: null,
     closestApproach: null,
     longestPutt: null,
     longestHoleOut: null,
@@ -462,18 +463,24 @@ export function personalBests(rounds, baseline = 'tour') {
          * data says which holes bend, so the figure is biased upward
          * and cannot be corrected — see the note in the UI.
          *
-         * Restricting it to clean drives that finished in the fairway
-         * or on the green removes the worst of the nonsense: a drive
-         * into trouble followed by a drop was scoring a huge number
-         * for a ball that was never in play.
+         * Counted when the ball stayed in play: no penalty, and not
+         * in trouble. A drive that leaked into the rough or a fairway
+         * bunker was still struck that far, so it counts. A drive into
+         * the trees followed by a drop was not, and used to score a
+         * huge number for a ball nobody hit.
          */
-        if (category === 'ott' && clean && !shot.holed && shot.endDist != null
-          && (shot.endLie === 'fairway' || shot.endLie === 'green')) {
+        const inPlay = ['fairway', 'rough', 'sand', 'green'].includes(shot.endLie);
+        if (category === 'ott' && clean && !shot.holed && shot.endDist != null && inPlay) {
           const endYards = shot.endUnit === 'ft' ? shot.endDist / 3 : shot.endDist;
           const carried = shot.startDist - endYards;
           if (carried > 0) {
-            consider('longestDrive', { ...context, yards: Math.round(carried), endLie: shot.endLie },
-              (a, b) => a.yards > b.yards);
+            const drive = { ...context, yards: Math.round(carried), endLie: shot.endLie };
+            consider('longestDrive', drive, (a, b) => a.yards > b.yards);
+            // The long-drive competition rule: only counts if you
+            // found the short grass.
+            if (shot.endLie === 'fairway') {
+              consider('longestFairwayDrive', drive, (a, b) => a.yards > b.yards);
+            }
           }
         }
 
