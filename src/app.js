@@ -43,6 +43,7 @@ import {
   greensInRegulation,
   trendSeries,
   personalBests,
+  playerSummary,
   missTally,
 } from './model.js';
 
@@ -169,6 +170,7 @@ const NAV = [
   { key: 'home', label: 'Play' },
   { key: 'history', label: 'Rounds' },
   { key: 'stats', label: 'Stats' },
+  { key: 'clubhouse', label: 'Clubhouse' },
   { key: 'courses', label: 'Courses' },
 ];
 
@@ -176,6 +178,7 @@ const NAV_GROUPS = {
   home: ['home', 'setup', 'play', 'scorecard', 'summary'],
   history: ['history', 'detail', 'settings'],
   stats: ['stats'],
+  clubhouse: ['clubhouse'],
   courses: ['courses', 'courseEdit', 'courseImport'],
 };
 
@@ -1552,6 +1555,159 @@ function renderMissCard(title, stats) {
   </div>`;
 }
 
+/* --- Clubhouse ----------------------------------------------------
+   Everyone side by side. Each row is one measure across all players,
+   with the leader marked, because a column of numbers only means
+   something next to somebody else's column.
+------------------------------------------------------------------ */
+
+/**
+ * `better` says which direction wins, so scoring metrics (lower is
+ * better) and gained metrics (higher is better) can share one table.
+ */
+const COMPARE_SECTIONS = [
+  {
+    title: 'Scoring',
+    note: 'Per 18 holes, so a weekday nine compares honestly with a full round.',
+    metrics: [
+      { label: 'Rounds', get: (s) => s.rounds, fmt: (v) => String(v), better: null },
+      { label: 'To par', get: (s) => s.toParPer18, fmt: (v) => fmtToPar(Math.round(v)), better: 'lower' },
+      { label: 'Best round', get: (s) => (s.bests.bestRound ? s.bests.bestRound.toPar : null), fmt: (v) => fmtToPar(v), better: 'lower' },
+    ],
+  },
+  {
+    title: 'Strokes gained',
+    note: 'Per 18 holes against the tour baseline. Score-only rounds sit this out.',
+    metrics: [
+      { label: 'Total', get: (s) => (s.sg ? s.sg.total : null), fmt: fmtSG, better: 'higher', strong: true },
+      { label: 'Off the tee', get: (s) => (s.sg ? s.sg.ott : null), fmt: fmtSG, better: 'higher' },
+      { label: 'Approach', get: (s) => (s.sg ? s.sg.app : null), fmt: fmtSG, better: 'higher' },
+      { label: 'Short game', get: (s) => (s.sg ? s.sg.arg : null), fmt: fmtSG, better: 'higher' },
+      { label: 'Putting', get: (s) => (s.sg ? s.sg.putt : null), fmt: fmtSG, better: 'higher' },
+    ],
+  },
+  {
+    title: 'The basics',
+    metrics: [
+      { label: 'Greens', get: (s) => s.girPct, fmt: (v) => `${v}%`, better: 'higher' },
+      { label: 'Fairways', get: (s) => s.fairwayPct, fmt: (v) => `${v}%`, better: 'higher' },
+      { label: 'Putts / 18', get: (s) => s.puttsPer18, fmt: (v) => v.toFixed(1), better: 'lower' },
+    ],
+  },
+  {
+    title: 'Career bests',
+    metrics: [
+      { label: 'Longest drive', get: (s) => (s.bests.longestDrive ? s.bests.longestDrive.yards : null), fmt: (v) => `${v}y`, better: 'higher' },
+      { label: 'Closest approach', get: (s) => (s.bests.closestApproach ? s.bests.closestApproach.feet : null), fmt: (v) => `${Math.round(v)}ft`, better: 'lower' },
+      { label: 'Longest putt', get: (s) => (s.bests.longestPutt ? s.bests.longestPutt.feet : null), fmt: (v) => `${Math.round(v)}ft`, better: 'higher' },
+    ],
+  },
+];
+
+function screenClubhouse() {
+  const all = store.getRounds();
+  const players = [...new Set(all.map((r) => r.player))].filter(Boolean).sort();
+
+  if (players.length === 0) {
+    return `${topbar('Clubhouse')}
+      <div class="card"><div class="empty">
+        <div class="glyph">&#127948;</div>
+        <div>Nobody has logged a round yet.</div>
+      </div></div>`;
+  }
+
+  const summaries = players.map((p) => playerSummary(p, all));
+  const cols = `minmax(96px,1.3fr) repeat(${players.length}, minmax(58px,1fr))`;
+
+  const leaderOf = (metric) => {
+    if (!metric.better) return null;
+    let best = null;
+    summaries.forEach((s) => {
+      const v = metric.get(s);
+      if (v == null) return;
+      if (best === null) { best = { player: s.player, v }; return; }
+      const wins = metric.better === 'higher' ? v > best.v : v < best.v;
+      if (wins) best = { player: s.player, v };
+    });
+    // A leader nobody is competing with is not a leader.
+    const contenders = summaries.filter((s) => metric.get(s) != null).length;
+    return contenders > 1 && best ? best.player : null;
+  };
+
+  return `${topbar('Clubhouse')}
+    ${notices()}
+    <div class="card">
+      <h2>Everyone</h2>
+      <p class="muted">${players.length} player${players.length === 1 ? '' : 's'}, ${all.length} round${all.length === 1 ? '' : 's'} between them. The leader in each row is marked.</p>
+      <div style="overflow-x:auto">
+        <div style="min-width:${100 + players.length * 62}px">
+          <div class="card-editor">
+            <div class="hdr" style="grid-template-columns:${cols}">
+              <span></span>
+              ${summaries.map((s) => `<span style="text-align:center">${esc(s.player)}</span>`).join('')}
+            </div>
+            ${COMPARE_SECTIONS.map((section) => `
+              <div class="line" style="grid-template-columns:1fr;border-bottom:none;padding-top:12px">
+                <span><strong style="font-size:13px">${section.title}</strong>
+                  ${section.note ? `<span class="tiny">${section.note}</span>` : ''}</span>
+              </div>
+              ${section.metrics.map((metric) => {
+                const leader = leaderOf(metric);
+                return `<div class="line" style="grid-template-columns:${cols}">
+                  <span class="tiny" style="font-weight:600">${metric.label}</span>
+                  ${summaries.map((s) => {
+                    const v = metric.get(s);
+                    const isLeader = leader === s.player;
+                    return `<span class="mono" style="text-align:center;font-size:${metric.strong ? '13px' : '12px'};font-weight:${isLeader || metric.strong ? 700 : 500};color:${
+                      v == null ? 'var(--ink-faint)'
+                        : isLeader ? 'var(--green-mid)'
+                        : 'var(--ink)'
+                    }">${v == null ? '&ndash;' : metric.fmt(v)}</span>`;
+                  }).join('')}
+                </div>`;
+              }).join('')}
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    ${renderClubhouseNotes(summaries)}`;
+}
+
+/** A plain-language read of who is doing what well. */
+function renderClubhouseNotes(summaries) {
+  const withSG = summaries.filter((s) => s.sg);
+  if (withSG.length < 2) {
+    return `<div class="card">
+      <p class="muted">Once a second player logs a round with shots in it, this fills in with who is strongest where.</p>
+    </div>`;
+  }
+
+  const lines = withSG.map((s) => {
+    // Each player's own best and worst part of the game, relative to
+    // the rest of their game rather than to the other players.
+    const profile = handicapProfile({ ...s.sg });
+    const strong = profile.strongest;
+    const weak = profile.weakest;
+    return `<div class="row">
+      <div class="badge">${fmtHandicap(profile.overall)}</div>
+      <div class="row-meta">
+        <div class="rname">${esc(s.player)}</div>
+        <div class="rsub">Strongest ${CATEGORY_LABELS[strong.category].toLowerCase()}, weakest ${CATEGORY_LABELS[weak.category].toLowerCase()}</div>
+      </div>
+      <div class="row-val ${sgClass(s.sg.total)}">${fmtSG(s.sg.total)}</div>
+    </div>`;
+  }).join('');
+
+  return `<div class="card">
+    <h2>Where each game stands</h2>
+    <p class="muted">Each player's handicap level, and the part of their own game that is furthest ahead and furthest behind.</p>
+    ${lines}
+    <p class="tiny" style="margin-top:8px">Strongest and weakest are measured against that player's own standard, not against each other &mdash; a 20 handicap can have a better short game than a 5 relative to the rest of what they do.</p>
+  </div>`;
+}
+
 /* --- Course management ------------------------------------------- */
 
 function screenCourses() {
@@ -1726,6 +1882,7 @@ const SCREENS = {
   detail: screenDetail,
   settings: screenSettings,
   stats: screenStats,
+  clubhouse: screenClubhouse,
   courses: screenCourses,
   courseImport: screenCourseImport,
   courseEdit: screenCourseEdit,

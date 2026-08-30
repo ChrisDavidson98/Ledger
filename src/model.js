@@ -522,6 +522,54 @@ export function personalBests(rounds, baseline = 'tour') {
  * direction says whether it matters. A miss you make often but which
  * costs nothing is not the miss to fix.
  */
+/**
+ * Everything about one player, in the shapes a comparison needs.
+ *
+ * Scoring figures use every round; strokes-gained figures use only
+ * rounds with shots in them. Mixing those would let a score-only
+ * round drag somebody's approach average toward zero.
+ */
+export function playerSummary(player, allRounds, baseline = 'tour') {
+  const mine = allRounds.filter((r) => r.player === player && playedHoles(r).length);
+  const withShots = sgRounds(mine);
+
+  const holes = withShots.reduce((sum, r) => sum + playedHoles(r).length, 0);
+  const scoredHoles = mine.reduce((sum, r) => sum + playedHoles(r).length, 0);
+  const scale = holes ? 18 / holes : 0;
+
+  const sg = { total: 0 };
+  CATEGORIES.forEach((c) => { sg[c] = 0; });
+  withShots.forEach((round) => {
+    const totals = roundTotals(round, baseline);
+    CATEGORIES.forEach((c) => { sg[c] += totals[c]; });
+    sg.total += totals.total;
+  });
+  CATEGORIES.forEach((c) => { sg[c] *= scale; });
+  sg.total *= scale;
+
+  const gir = greensInRegulation(withShots);
+  const tee = teeOutcomes(withShots, baseline);
+  const putts = puttingBuckets(withShots, baseline).reduce((sum, b) => sum + b.putts, 0);
+
+  // Scoring is per 18 so a nine does not look like a brilliant round.
+  const toParPer18 = scoredHoles
+    ? (mine.reduce((sum, r) => sum + roundToPar(r), 0) / scoredHoles) * 18
+    : null;
+
+  return {
+    player,
+    rounds: mine.length,
+    shotRounds: withShots.length,
+    holes: scoredHoles,
+    sg: holes ? sg : null,
+    toParPer18,
+    girPct: gir.holes ? gir.pct : null,
+    fairwayPct: tee.total ? tee.fairwayPct : null,
+    puttsPer18: holes ? (putts / holes) * 18 : null,
+    bests: personalBests(mine, baseline),
+  };
+}
+
 export function missTally(rounds, category, baseline = 'tour') {
   const tally = {};
   const sgByDir = {};
