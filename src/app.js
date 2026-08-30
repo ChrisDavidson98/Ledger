@@ -47,6 +47,8 @@ import {
   playerSummary,
   nemesisHoles,
   clubDistances,
+  distanceHistogram,
+  clubGapping,
   holeRecords,
   missTally,
 } from './model.js';
@@ -1153,7 +1155,7 @@ function screenStats() {
 
     ${renderMissCard('Tee shot misses', teeMiss)}
     ${renderMissCard('Approach misses', appMiss)}
-    ${renderClubCard(clubDistances(rounds))}
+    ${(() => { const cd = clubDistances(rounds); return renderClubCard(cd) + renderGappingCard(cd); })()}
     ${renderNemesisCard(rounds)}
     ${renderBestsCard(personalBests(rounds), allRounds)}
     ${renderComparison()}`;
@@ -1414,31 +1416,97 @@ function renderHandicapCard(profile, { subtitle, caveat } = {}) {
   </div>`;
 }
 
-/** What each club actually goes, once there is enough of it to say. */
+/**
+ * Each club's distances as a distribution, on one shared scale.
+ *
+ * Min and max alone say almost nothing — a club with one thin shot
+ * looks identical to one that is genuinely inconsistent. The shape
+ * says where the ball usually finishes and how far the tails run,
+ * which is the number you actually club off.
+ */
 function renderClubCard(clubs) {
   if (!clubs.length) return '';
-  const widest = Math.max(...clubs.map((c) => c.longest));
+
+  const floor = Math.min(...clubs.map((c) => c.shortest));
+  const ceiling = Math.max(...clubs.map((c) => c.longest));
+  const span = Math.max(ceiling - floor, 1);
+  const pos = (yards) => ((yards - floor) / span) * 100;
 
   return `<div class="card">
     <h2>Your clubs</h2>
-    <p class="muted">Distance advanced on approach shots, by club. The bar shows the spread from your shortest to your longest.</p>
+    <p class="muted">Where each club actually finishes. Taller means more shots landed there; the band is the middle half, and the line is your typical.</p>
+
     ${clubs.map((c) => {
-      const left = (c.shortest / widest) * 100;
-      const width = Math.max(((c.longest - c.shortest) / widest) * 100, 1.5);
-      const mid = (c.typical / widest) * 100;
-      return `<div class="row" style="${thinStyle(c.shots)}">
-        <div class="badge" style="font-size:12px">${esc(c.club)}</div>
+      const { bins, peak } = distanceHistogram(c.distances, 5);
+      const bandLeft = pos(c.lowerQuartile);
+      const bandWidth = Math.max(pos(c.upperQuartile) - bandLeft, 1);
+
+      return `<div class="row" style="${thinStyle(c.shots)};align-items:flex-start">
+        <div class="badge" style="font-size:12px;margin-top:6px">${esc(c.club)}</div>
         <div class="row-meta">
-          <div class="rname">${Math.round(c.typical)}y typical${thinMark(c.shots)}</div>
-          <div style="position:relative;height:8px;margin-top:5px;background:var(--cream);border-radius:4px">
-            <div style="position:absolute;left:${left}%;width:${width}%;top:0;bottom:0;background:var(--green-line);border-radius:4px"></div>
-            <div style="position:absolute;left:calc(${mid}% - 2px);top:-2px;width:4px;height:12px;background:var(--flag);border-radius:2px"></div>
+          <div class="split">
+            <span class="rname">${Math.round(c.typical)}y typical${thinMark(c.shots)}</span>
+            <span class="tiny mono">${Math.round(c.lowerQuartile)}&ndash;${Math.round(c.upperQuartile)}y &middot; ${c.shots}</span>
           </div>
-          <div class="rsub" style="margin-top:3px">${Math.round(c.shortest)}&ndash;${Math.round(c.longest)}y &middot; ${c.shots} shot${c.shots === 1 ? '' : 's'}</div>
+          <div style="position:relative;height:26px;margin-top:3px">
+            <div style="position:absolute;left:${bandLeft}%;width:${bandWidth}%;top:0;bottom:5px;
+                        background:var(--green-line);opacity:0.35;border-radius:3px"></div>
+            ${bins.filter((b) => b.count).map((b) => {
+              const left = pos(b.from);
+              const width = Math.max(pos(b.to) - left, 2);
+              const height = Math.max((b.count / peak) * 20, 4);
+              return `<div title="${b.from}-${b.to}y: ${b.count} shots"
+                style="position:absolute;left:${left}%;width:${width}%;bottom:5px;height:${height}px;
+                       background:var(--green-mid);border-radius:2px 2px 0 0;opacity:${(0.45 + (b.count / peak) * 0.55).toFixed(2)}"></div>`;
+            }).join('')}
+            <div style="position:absolute;left:calc(${pos(c.typical)}% - 1px);top:0;bottom:3px;width:2px;background:var(--flag)"></div>
+            <div style="position:absolute;left:0;right:0;bottom:4px;height:1px;background:var(--green-line);opacity:0.6"></div>
+          </div>
         </div>
       </div>`;
     }).join('')}
-    <p class="tiny" style="margin-top:8px">Typical is the middle of your shots, not the average &mdash; one thinned 7-iron should not shorten the club. Gaps or overlaps between clubs are the useful part.</p>
+
+    <div class="split tiny" style="margin-top:4px;padding:0 2px">
+      <span>${Math.round(floor)}y</span>
+      <span>${Math.round(floor + span / 2)}y</span>
+      <span>${Math.round(ceiling)}y</span>
+    </div>
+    <p class="tiny" style="margin-top:8px">All clubs share one scale, so the rows line up against each other. The figures on the right are the middle half of your shots. Typical is the middle shot rather than the average &mdash; one thinned 7-iron should not shorten the club.</p>
+  </div>`;
+}
+
+/** Where the set overlaps itself, and where it leaves a hole. */
+function renderGappingCard(clubs) {
+  const { gaps, clubs: usable } = clubGapping(clubs, { minShots: 3 });
+  if (!gaps.length) {
+    return usable.length || clubs.length ? `<div class="card">
+      <h2>Gapping</h2>
+      <p class="muted">Once three or more shots are logged with each of two clubs, the gap between them shows up here.</p>
+    </div>` : '';
+  }
+
+  const problems = gaps.filter((g) => g.verdict !== 'ok');
+
+  return `<div class="card">
+    <h2>Gapping</h2>
+    <p class="muted">The step down from each club to the next, using typical distances.</p>
+    ${gaps.map((g) => `
+      <div class="row">
+        <div class="badge" style="font-size:11px;background:${
+          g.verdict === 'ok' ? 'var(--green-mid)' : 'var(--flag)'
+        };color:#fff">${Math.round(g.gap)}y</div>
+        <div class="row-meta">
+          <div class="rname">${esc(g.longer)} to ${esc(g.shorter)}</div>
+          <div class="rsub">${
+            g.verdict === 'overlap' ? 'Overlapping — two clubs doing one job'
+            : g.verdict === 'wide' ? 'A wide step — this distance has to be forced or eased'
+            : 'A clean step'
+          }</div>
+        </div>
+      </div>`).join('')}
+    <p class="tiny" style="margin-top:8px">${problems.length
+      ? `${problems.length} step${problems.length === 1 ? '' : 's'} worth a look. Lofts vary between manufacturers, so what the number on the sole says matters less than where the ball lands.`
+      : 'Even steps the whole way down, which is what you want.'}</p>
   </div>`;
 }
 

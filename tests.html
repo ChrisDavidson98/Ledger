@@ -62,6 +62,7 @@ function shot(startLie, startDist, endLie, endDist, extra = {}) {
     endLie: extra.holed ? null : endLie,
     endDist: extra.holed ? null : endDist,
     holed: !!extra.holed, penalty: extra.penalty || 0, miss: extra.miss || null,
+    club: extra.club || null,
   });
 }
 
@@ -394,6 +395,68 @@ check('the same ground played twice counts as one hole', () => {
 });
 
 /* --- Handicap model --------------------------------------------- */
+
+suite('Clubs');
+
+check('club distances come from what the shot advanced', () => {
+  const r = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'fairway', 160),
+    shot('fairway', 160, 'green', 30, { club: '7i' }),   // 160y - 10y = 150
+    shot('green', 30, null, null, { holed: true }) ] }]);
+  const clubs = M.clubDistances([r]);
+  if (clubs.length !== 1) return `${clubs.length} clubs found`;
+  return eq(Math.round(clubs[0].typical), 150, '7i distance');
+});
+
+check('a shot with a penalty does not count toward a club', () => {
+  const r = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'fairway', 160),
+    shot('fairway', 160, 'green', 30, { club: '7i', penalty: 1 }),
+    shot('green', 30, null, null, { holed: true }) ] }]);
+  return M.clubDistances([r]).length === 0 ? null : 'penalty shot was counted';
+});
+
+check('typical is the middle shot, not the average', () => {
+  const holes = [90, 150, 152, 154, 156].map((carry) => ({
+    par: 4, yards: 400, shots: [
+      shot('tee', 400, 'fairway', 200),
+      shot('fairway', 200, 'green', (200 - carry) * 3, { club: '7i' }),
+      shot('green', (200 - carry) * 3, null, null, { holed: true }) ],
+  }));
+  const clubs = M.clubDistances([roundOf(holes)]);
+  const typical = clubs[0].typical;
+  // The 90 yard duff must not drag the number below the cluster.
+  return typical >= 150 ? null : `typical ${Math.round(typical)}, expected 150 or more`;
+});
+
+check('the histogram puts every shot in exactly one bin', () => {
+  const h = M.distanceHistogram([141, 145, 149, 150, 151, 168], 5);
+  const total = h.bins.reduce((s, b) => s + b.count, 0);
+  return eq(total, 6, 'binned shots');
+});
+
+check('gapping spots an overlap and a wide step', () => {
+  const clubs = [
+    { club: '6i', typical: 170, shots: 5 },
+    { club: '7i', typical: 168, shots: 5 },   // 2y — overlapping
+    { club: '8i', typical: 140, shots: 5 },   // 28y — wide
+  ];
+  const { gaps } = M.clubGapping(clubs);
+  if (gaps.length !== 2) return `${gaps.length} gaps`;
+  if (gaps[0].verdict !== 'overlap') return `first gap read as ${gaps[0].verdict}`;
+  return eq(gaps[1].verdict, 'wide', 'second gap');
+});
+
+check('clubs with too few shots stay out of gapping', () => {
+  const clubs = [
+    { club: '6i', typical: 170, shots: 5 },
+    { club: '7i', typical: 158, shots: 1 },
+    { club: '8i', typical: 146, shots: 4 },
+  ];
+  const { gaps } = M.clubGapping(clubs, { minShots: 3 });
+  if (gaps.length !== 1) return `${gaps.length} gaps, expected 1`;
+  return eq(gaps[0].shorter, '8i', 'gap skipped the thin club');
+});
 
 suite('Handicap model');
 

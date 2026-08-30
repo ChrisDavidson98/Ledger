@@ -126,17 +126,79 @@ export function clubDistances(rounds, baseline = 'tour') {
   return [...byClub.values()].map((entry) => {
     const sorted = entry.distances.slice().sort((a, b) => a - b);
     const sum = sorted.reduce((s, v) => s + v, 0);
+    const at = (fraction) => sorted[Math.min(sorted.length - 1,
+      Math.floor(fraction * sorted.length))];
     return {
       club: entry.club,
       shots: sorted.length,
+      distances: sorted,
       avg: sum / sorted.length,
       shortest: sorted[0],
       longest: sorted[sorted.length - 1],
       // The middle of the pack, which is closer to "what you can
       // count on" than an average a single thin one drags down.
-      typical: sorted[Math.floor(sorted.length / 2)],
+      typical: at(0.5),
+      // The middle half — where the club lands when nothing unusual
+      // happens, which is the number worth clubbing off.
+      lowerQuartile: at(0.25),
+      upperQuartile: at(0.75),
     };
   }).sort((a, b) => (order.get(a.club) ?? 99) - (order.get(b.club) ?? 99));
+}
+
+/**
+ * Distances grouped into bins, for drawing the shape of a club rather
+ * than just its ends. Small samples produce a sparse chart, which is
+ * the honest picture of a small sample.
+ */
+export function distanceHistogram(distances, binSize = 5) {
+  if (!distances.length) return { bins: [], binSize, peak: 0 };
+  const lo = Math.floor(Math.min(...distances) / binSize) * binSize;
+  const hi = Math.ceil((Math.max(...distances) + 0.001) / binSize) * binSize;
+  const count = Math.max(1, Math.round((hi - lo) / binSize));
+
+  const bins = Array.from({ length: count }, (_, i) => ({
+    from: lo + i * binSize,
+    to: lo + (i + 1) * binSize,
+    count: 0,
+  }));
+  distances.forEach((d) => {
+    const idx = Math.min(bins.length - 1, Math.floor((d - lo) / binSize));
+    bins[idx].count += 1;
+  });
+
+  return { bins, binSize, peak: Math.max(...bins.map((b) => b.count)) };
+}
+
+/**
+ * The gap between each club and the next one down.
+ *
+ * Overlapping clubs are two clubs doing one job; a wide gap is a
+ * distance that has to be forced or eased, which is where mis-clubs
+ * come from. Both are read off typical distances rather than the
+ * longest one anybody ever hit.
+ */
+export function clubGapping(clubs, { minShots = 3 } = {}) {
+  const usable = clubs
+    .filter((c) => c.shots >= minShots)
+    .slice()
+    .sort((a, b) => b.typical - a.typical);
+
+  const gaps = [];
+  for (let i = 0; i < usable.length - 1; i++) {
+    const longer = usable[i];
+    const shorter = usable[i + 1];
+    const gap = longer.typical - shorter.typical;
+    gaps.push({
+      longer: longer.club,
+      shorter: shorter.club,
+      gap,
+      // Under 5 yards is one club doing another's job; over 20 leaves
+      // a distance with nothing that covers it comfortably.
+      verdict: gap < 5 ? 'overlap' : gap > 20 ? 'wide' : 'ok',
+    });
+  }
+  return { gaps, clubs: usable };
 }
 
 /**
