@@ -375,6 +375,26 @@ export async function pushPending() {
   return { pushed: payloads.length };
 }
 
+/** Remove deleted rounds from the sheet so they stop coming back. */
+export async function pushDeletions() {
+  const ids = store.pendingDeletions();
+  if (!ids.length) return { deleted: 0 };
+  await post('deleteRounds', { ids });
+  ids.forEach(store.clearDeletion);
+  return { deleted: ids.length };
+}
+
+/**
+ * Re-send every stored round, whether or not it is queued. Needed
+ * when the row format changes: rounds already marked synced are
+ * sitting on the sheet in the old shape and nothing would resend them.
+ */
+export async function pushAll() {
+  const count = store.requeueAll();
+  await pushPending();
+  return { pushed: count };
+}
+
 /** Pull everyone's rounds and merge them in, local edits winning. */
 export async function pullRounds({ full = false } = {}) {
   const data = await post('pullRounds', { since: full ? null : lastPull() });
@@ -389,12 +409,15 @@ export async function pullRounds({ full = false } = {}) {
   const local = store.getRounds();
   const localIds = new Set(local.map((r) => r.id));
   const pending = new Set(store.unsynced());
+  const deleted = new Set(store.pendingDeletions());
   let added = 0;
 
   (data.rounds || []).forEach((summaryRow) => {
     const id = String(summaryRow.round_id);
     // Never let the server overwrite a round we have not pushed yet.
     if (pending.has(id)) return;
+    // Nor resurrect one this device has deleted but not yet synced.
+    if (deleted.has(id)) return;
     const rows = shotsByRound.get(id) || [];
     // A round with no rows at all is a partial write, not a real round.
     if (!rows.length) return;
@@ -434,8 +457,16 @@ export async function pullCourses() {
 export async function syncAll() {
   const result = { pushed: 0, pulled: 0, courses: 0, errors: [] };
 
-  // Push first: local work should reach the sheet before anything
-  // from the sheet is allowed to land on top of it.
+  // Deletions go first, so a round removed here is gone from the
+  // sheet before the pull could hand it back.
+  try {
+    result.deleted = (await pushDeletions()).deleted;
+  } catch (err) {
+    result.errors.push('Delete failed: ' + err.message);
+  }
+
+  // Push before pull: local work should reach the sheet before
+  // anything from the sheet is allowed to land on top of it.
   try {
     result.pushed = (await pushPending()).pushed;
   } catch (err) {

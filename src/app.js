@@ -867,8 +867,11 @@ function screenSettings() {
       </div>
       <div class="btn-row">
         <button class="btn-ghost" data-action="full-pull" ${sync.isConfigured() && !STATE.syncBusy ? '' : 'disabled'}>Pull Everything</button>
+        <button class="btn-ghost" data-action="push-all" ${sync.isConfigured() && !STATE.syncBusy ? '' : 'disabled'}>Push Everything</button>
       </div>
-      <p class="tiny">Pull Everything re-reads the whole sheet, rather than only what changed since the last sync. Use it on a new phone.</p>
+      <p class="tiny">Pull re-reads the whole sheet rather than only what changed &mdash; use it on a new phone. Push re-sends every round on this phone, which is what to reach for if a round is missing from the sheet or was written before a format change.</p>
+      ${store.pendingDeletions().length ? `
+        <p class="tiny sg-neg">${store.pendingDeletions().length} deleted round${store.pendingDeletions().length === 1 ? '' : 's'} still to be removed from the sheet &mdash; they go on the next sync.</p>` : ''}
     </div>
 
     ${sync.hasUrl() ? `
@@ -2102,7 +2105,14 @@ const ACTIONS = {
   'sync-now': () => runSync('Sync', async () => {
     const result = await sync.syncAll();
     if (result.errors.length) throw new Error(result.errors.join(' '));
-    return `Pushed ${result.pushed}, pulled ${result.pulled} round${result.pulled === 1 ? '' : 's'}.`;
+    const bits = [`pushed ${result.pushed}`, `pulled ${result.pulled}`];
+    if (result.deleted) bits.push(`removed ${result.deleted}`);
+    return bits.join(', ') + ` round${result.pulled === 1 && result.pushed === 1 ? '' : 's'}.`;
+  }),
+
+  'push-all': () => runSync('Push', async () => {
+    const result = await sync.pushAll();
+    return `Re-sent ${result.pushed} round${result.pushed === 1 ? '' : 's'} to the sheet.`;
   }),
 
   'full-pull': () => runSync('Pull', async () => {

@@ -17,6 +17,7 @@ const KEYS = {
   rounds: PREFIX + 'rounds',
   courses: PREFIX + 'courses',
   syncQueue: PREFIX + 'sync_queue',
+  deleteQueue: PREFIX + 'delete_queue',
 };
 
 function read(key, fallback) {
@@ -150,9 +151,37 @@ export function replaceRound(round) {
   write(KEYS.rounds, rounds);
 }
 
+/**
+ * Delete locally and remember to delete on the sheet.
+ *
+ * The tombstone matters twice over: it tells the next sync to remove
+ * the round from the sheet, and it stops a pull that happens first
+ * from resurrecting it. Without it a deleted round came back every
+ * time anyone pulled.
+ */
 export function deleteRound(id) {
   write(KEYS.rounds, getRounds().filter((r) => r.id !== id));
   markSynced(id);
+  const queue = read(KEYS.deleteQueue, []);
+  if (!queue.includes(id)) {
+    queue.push(id);
+    write(KEYS.deleteQueue, queue);
+  }
+}
+
+export function pendingDeletions() {
+  return read(KEYS.deleteQueue, []);
+}
+
+export function clearDeletion(id) {
+  write(KEYS.deleteQueue, pendingDeletions().filter((x) => x !== id));
+}
+
+/** Re-queue every stored round, to push them all up again. */
+export function requeueAll() {
+  const ids = getRounds().map((r) => r.id);
+  write(KEYS.syncQueue, ids);
+  return ids.length;
 }
 
 /* --- Courses ---------------------------------------------------- */

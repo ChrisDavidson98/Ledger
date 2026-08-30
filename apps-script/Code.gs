@@ -72,6 +72,7 @@ function doPost(e) {
       case 'ping':         return respond({ ok: true, pong: true });
       case 'setup':        return respond(setupSheets());
       case 'pushRounds':   return respond(pushRounds(body.rounds || []));
+      case 'deleteRounds': return respond(deleteRounds(body.ids || []));
       case 'pullRounds':   return respond(pullRounds(body.since || null));
       case 'pushCourses':  return respond(pushCourses(body.courses || []));
       case 'pullCourses':  return respond(pullCourses());
@@ -275,6 +276,18 @@ function pushRounds(rounds) {
   replaceRows('shots', 'round_id', ids, shotRows);
 
   return { ok: true, written: summaryRows.length, shots: shotRows.length };
+}
+
+/**
+ * Remove rounds entirely. Without this a round deleted on a phone
+ * came straight back on the next pull, since the sheet still had it
+ * and the sheet is what everyone reads from.
+ */
+function deleteRounds(ids) {
+  if (!ids.length) return { ok: true, deleted: 0 };
+  replaceRows('rounds', 'round_id', ids, []);
+  replaceRows('shots', 'round_id', ids, []);
+  return { ok: true, deleted: ids.length };
 }
 
 /** Raw shot rows, so the client can rebuild rounds and recompute SG itself. */
