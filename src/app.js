@@ -40,6 +40,7 @@ import {
   teeOutcomes,
   greensInRegulation,
   trendSeries,
+  personalBests,
   missTally,
 } from './model.js';
 
@@ -993,6 +994,7 @@ function screenStats() {
 
     ${renderMissCard('Tee shot misses', teeMiss)}
     ${renderMissCard('Approach misses', appMiss)}
+    ${renderBestsCard(personalBests(rounds))}
     ${renderComparison()}`;
 }
 
@@ -1161,10 +1163,10 @@ function renderTeeCard(tee) {
     <h2>Off the tee</h2>
     <p class="muted">Where tee shots on par 4s and 5s finished, and what each outcome cost.</p>
     ${tee.rows.map((row) => `
-      <div class="row">
+      <div class="row" style="${thinStyle(row.count)}">
         <div class="badge" style="font-size:12px">${Math.round((row.count / tee.total) * 100)}%</div>
         <div class="row-meta">
-          <div class="rname">${LIE_LABELS[row.lie] || esc(row.lie)}</div>
+          <div class="rname">${LIE_LABELS[row.lie] || esc(row.lie)}${thinMark(row.count)}</div>
           <div class="rsub">${row.count} of ${tee.total} tee shots</div>
         </div>
         <div class="row-val ${sgClass(row.sg / row.count)}">${fmtSG(row.sg / row.count)}</div>
@@ -1179,10 +1181,10 @@ function renderPuttingCard(putts) {
     <h2>Putting</h2>
     <p class="muted">Make rate and strokes gained by distance.</p>
     ${putts.map((b) => `
-      <div class="row">
+      <div class="row" style="${thinStyle(b.putts)}">
         <div class="badge" style="font-size:11px">${esc(b.label)}</div>
         <div class="row-meta">
-          <div class="rname">${b.putts} putt${b.putts === 1 ? '' : 's'} &middot; ${Math.round((b.holed / b.putts) * 100)}% holed</div>
+          <div class="rname">${b.putts} putt${b.putts === 1 ? '' : 's'} &middot; ${Math.round((b.holed / b.putts) * 100)}% holed${thinMark(b.putts)}</div>
           <div class="rsub">${b.threePutts ? `${b.threePutts} three-putt${b.threePutts === 1 ? '' : 's'} from here` : 'no three-putts from here'}</div>
         </div>
         <div class="row-val ${sgClass(b.sg / b.putts)}">${fmtSG(b.sg / b.putts)}</div>
@@ -1190,23 +1192,79 @@ function renderPuttingCard(putts) {
   </div>`;
 }
 
+/** Below this, a per-shot average is noise rather than a signal. */
+const THIN_SAMPLE = 5;
+
+function thinMark(count) {
+  return count < THIN_SAMPLE
+    ? ` <span class="tiny" style="color:var(--ink-faint)">thin</span>`
+    : '';
+}
+
+function thinStyle(count) {
+  return count < THIN_SAMPLE ? 'opacity:0.55' : '';
+}
+
 function renderApproachCard(buckets) {
   if (!buckets.length) return '';
+  const thin = buckets.filter((b) => b.shots < THIN_SAMPLE).length;
   return `<div class="card">
     <h2>Approach play</h2>
-    <p class="muted">Strokes gained and average proximity by distance.</p>
+    <p class="muted">Strokes gained and average proximity by distance. Approach starts at 30 yards &mdash; anything closer counts as short game.</p>
     ${buckets.map((b) => `
-      <div class="row">
+      <div class="row" style="${thinStyle(b.shots)}">
         <div class="badge" style="font-size:11px">${esc(b.label)}</div>
         <div class="row-meta">
-          <div class="rname">${b.shots} shot${b.shots === 1 ? '' : 's'}</div>
+          <div class="rname">${b.shots} shot${b.shots === 1 ? '' : 's'}${thinMark(b.shots)}</div>
           <div class="rsub">${b.proximityCount
             ? 'Avg ' + Math.round(b.proximitySum / b.proximityCount) + 'ft when on'
             : 'never finished on the green'}</div>
         </div>
         <div class="row-val ${sgClass(b.sg / b.shots)}">${fmtSG(b.sg / b.shots)}</div>
       </div>`).join('')}
-    <p class="tiny" style="margin-top:8px">Per-shot average. The bucket costing most per swing is where practice pays.</p>
+    <p class="tiny" style="margin-top:8px">Per-shot average. The bucket costing most per swing is where practice pays${
+      thin ? `, but ${thin === 1 ? 'the faded row has' : 'faded rows have'} under ${THIN_SAMPLE} shots &mdash; not enough to trust yet` : ''
+    }.</p>
+  </div>`;
+}
+
+function renderBestsCard(bests) {
+  const items = [];
+  const when = (b) => `${esc(b.course)} &middot; hole ${b.hole}`;
+
+  if (bests.longestDrive) {
+    items.push([`${bests.longestDrive.yards}y`, 'Longest drive', when(bests.longestDrive)]);
+  }
+  if (bests.closestApproach) {
+    items.push([`${Math.round(bests.closestApproach.feet)}ft`, 'Closest approach',
+      `from ${bests.closestApproach.from}y &middot; ${esc(bests.closestApproach.course)}`]);
+  }
+  if (bests.longestPutt) {
+    items.push([`${Math.round(bests.longestPutt.feet)}ft`, 'Longest putt holed', when(bests.longestPutt)]);
+  }
+  if (bests.longestHoleOut) {
+    items.push([`${bests.longestHoleOut.yards}y`, 'Holed from off the green', when(bests.longestHoleOut)]);
+  }
+  if (bests.bestRound) {
+    items.push([fmtToPar(bests.bestRound.toPar), 'Best round',
+      `${bests.bestRound.score} at ${esc(bests.bestRound.course)}`]);
+  }
+  if (bests.bestSG) {
+    items.push([fmtSG(bests.bestSG.sg), 'Best strokes gained',
+      `${esc(bests.bestSG.course)} &middot; ${fmtShortDate(bests.bestSG.date)}`]);
+  }
+  if (!items.length) return '';
+
+  return `<div class="card">
+    <h2>Career bests</h2>
+    ${items.map(([value, label, sub]) => `
+      <div class="row">
+        <div class="row-meta">
+          <div class="rname">${label}</div>
+          <div class="rsub">${sub}</div>
+        </div>
+        <div class="row-val" style="font-size:17px;color:var(--green-mid)">${value}</div>
+      </div>`).join('')}
   </div>`;
 }
 

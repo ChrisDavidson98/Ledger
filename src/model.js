@@ -192,8 +192,11 @@ export function nextUnplayedHole(round) {
 
 /** Approach shots bucketed by distance, with proximity and miss tendency. */
 export function approachBuckets(rounds, baseline = 'tour') {
+  // Starts at 30, not 0: anything inside 30 yards is classified as
+  // short game, so a bucket labelled 0-50 could only ever hold 30-50
+  // and the label misrepresented it.
   const bounds = [
-    [0, 50], [50, 75], [75, 100], [100, 125], [125, 150],
+    [30, 50], [50, 75], [75, 100], [100, 125], [125, 150],
     [150, 175], [175, 200], [200, Infinity],
   ];
   const buckets = bounds.map(([lo, hi]) => ({
@@ -391,6 +394,75 @@ export function trendSeries(rounds, baseline = 'tour') {
       CATEGORIES.forEach((c) => { point[c] = totals[c] * scale; });
       return point;
     });
+}
+
+/**
+ * Standout single shots and rounds. All of this is already in the raw
+ * data — a drive's length is just where it started minus where it
+ * finished — it simply was not surfaced anywhere.
+ */
+export function personalBests(rounds, baseline = 'tour') {
+  const best = {
+    longestDrive: null,
+    closestApproach: null,
+    longestPutt: null,
+    longestHoleOut: null,
+    bestRound: null,
+    bestSG: null,
+  };
+
+  const consider = (key, candidate, better) => {
+    if (!candidate) return;
+    if (!best[key] || better(candidate, best[key])) best[key] = candidate;
+  };
+
+  rounds.forEach((round) => {
+    const where = { round: round.id, date: round.date, course: round.courseName };
+
+    round.holes.forEach((hole) => {
+      hole.shots.forEach((shot) => {
+        const { category } = shotSG(shot, hole.par, baseline);
+        const context = { ...where, hole: hole.hole, par: hole.par };
+
+        // How far the shot actually travelled, in yards.
+        if (!shot.holed && shot.startUnit === 'y' && shot.endDist != null) {
+          const endYards = shot.endUnit === 'ft' ? shot.endDist / 3 : shot.endDist;
+          const carried = shot.startDist - endYards;
+          if (category === 'ott' && carried > 0) {
+            consider('longestDrive', { ...context, yards: Math.round(carried) },
+              (a, b) => a.yards > b.yards);
+          }
+        }
+
+        if (category === 'app' && !shot.holed && shot.endLie === 'green') {
+          consider('closestApproach',
+            { ...context, feet: shot.endDist, from: Math.round(shot.startDist) },
+            (a, b) => a.feet < b.feet);
+        }
+
+        if (shot.holed && shot.startLie === 'green') {
+          consider('longestPutt', { ...context, feet: shot.startDist },
+            (a, b) => a.feet > b.feet);
+        }
+
+        if (shot.holed && shot.startLie !== 'green' && shot.startUnit === 'y') {
+          consider('longestHoleOut', { ...context, yards: Math.round(shot.startDist) },
+            (a, b) => a.yards > b.yards);
+        }
+      });
+    });
+
+    const holes = playedHoles(round).length;
+    if (!holes) return;
+    consider('bestRound',
+      { ...where, holes, score: roundScore(round), toPar: roundToPar(round) },
+      (a, b) => a.toPar < b.toPar);
+    consider('bestSG',
+      { ...where, holes, sg: (roundTotals(round, baseline).total / holes) * 18 },
+      (a, b) => a.sg > b.sg);
+  });
+
+  return best;
 }
 
 /**
