@@ -443,6 +443,11 @@ export async function pushDeletions() {
   return { deleted: ids.length };
 }
 
+/** Reconcile duplicates and archive/live conflicts on the sheet. */
+export async function cleanup() {
+  return post('cleanup', {}, { timeout: 60000 });
+}
+
 /** Rounds sitting in the sheet's archive, newest deletion first. */
 export async function listArchive() {
   const data = await post('listArchive');

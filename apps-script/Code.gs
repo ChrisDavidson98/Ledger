@@ -60,7 +60,7 @@ SHEETS.shots_archive = SHEETS.shots.slice();
  * "that phone is pointed at an older deployment" is otherwise
  * invisible from the client.
  */
-var CONTRACT = 4;
+var CONTRACT = 5;
 
 function doGet(e) {
   return respond({
@@ -68,7 +68,7 @@ function doGet(e) {
     service: 'ledger',
     contract: CONTRACT,
     actions: ['ping', 'setup', 'pushRounds', 'deleteRounds', 'listArchive',
-      'restoreRounds', 'pullRounds', 'pushCourses', 'pullCourses'],
+      'restoreRounds', 'cleanup', 'pullRounds', 'pushCourses', 'pullCourses'],
   });
 }
 
@@ -99,6 +99,7 @@ function doPost(e) {
       case 'pushRounds':   return respond(pushRounds(body.rounds || []));
       case 'deleteRounds': return respond(deleteRounds(body.ids || []));
       case 'listArchive':  return respond(listArchive());
+      case 'cleanup':      return respond(cleanupSheet());
       case 'restoreRounds':return respond(restoreRounds(body.ids || []));
       case 'pullRounds':   return respond(pullRounds(body.since || null));
       case 'pushCourses':  return respond(pushCourses(body.courses || []));
@@ -302,6 +303,12 @@ function pushRounds(rounds) {
   replaceRows('rounds', 'round_id', ids, summaryRows);
   replaceRows('shots', 'round_id', ids, shotRows);
 
+  // Pushing a round un-archives it. A round cannot be both live and
+  // deleted, and leaving a stale archive copy behind was letting the
+  // same round exist in two contradictory states at once.
+  replaceRows('rounds_archive', 'round_id', ids, []);
+  replaceRows('shots_archive', 'round_id', ids, []);
+
   return { ok: true, written: summaryRows.length, shots: shotRows.length };
 }
 
@@ -345,6 +352,77 @@ function deleteRounds(ids) {
   replaceRows('shots', 'round_id', ids, []);
 
   return { ok: true, deleted: summaries.length, archivedShots: shots.length };
+}
+
+/**
+ * Reconcile the sheet after the states got out of step.
+ *
+ * Fixes two things it should not be possible to reach any more, but
+ * which older versions of the sync could produce: the same round
+ * appearing twice, and a round sitting in both the live tabs and the
+ * archive at once. Where a round is in both, the archive wins —
+ * somebody pressed delete, and that is the more recent intent.
+ */
+function cleanupSheet() {
+  var report = { ok: true, duplicateRounds: 0, duplicateShots: 0, unarchivedGhosts: 0 };
+
+  var archivedIds = {};
+  readAll('rounds_archive').forEach(function (row) {
+    archivedIds[String(row.round_id)] = true;
+  });
+
+  // Live rounds: drop anything archived, and keep only the last copy
+  // of any duplicated id.
+  var seen = {};
+  var keptRounds = [];
+  readAll('rounds').forEach(function (row) {
+    var id = String(row.round_id);
+    if (!id) return;
+    if (archivedIds[id]) { report.unarchivedGhosts++; return; }
+    if (seen[id] !== undefined) {
+      report.duplicateRounds++;
+      keptRounds[seen[id]] = row; // later row wins
+      return;
+    }
+    seen[id] = keptRounds.length;
+    keptRounds.push(row);
+  });
+
+  var keptIds = {};
+  keptRounds.forEach(function (row) { keptIds[String(row.round_id)] = true; });
+
+  var shotSeen = {};
+  var keptShots = [];
+  readAll('shots').forEach(function (row) {
+    var id = String(row.round_id);
+    if (!id || !keptIds[id]) return;
+    var key = id + '|' + row.hole + '|' + row.shot_num;
+    if (shotSeen[key] !== undefined) {
+      report.duplicateShots++;
+      keptShots[shotSeen[key]] = row;
+      return;
+    }
+    shotSeen[key] = keptShots.length;
+    keptShots.push(row);
+  });
+
+  writeAll('rounds', keptRounds);
+  writeAll('shots', keptShots);
+
+  report.rounds = keptRounds.length;
+  report.shots = keptShots.length;
+  return report;
+}
+
+/** Replace a tab's entire contents in one write. */
+function writeAll(name, rows) {
+  var sheet = sheetFor(name);
+  var width = SHEETS[name].length;
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, width).clearContent();
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, width).setValues(toMatrix(name, rows));
+  }
 }
 
 /** Everything sitting in the archive, newest deletion first. */

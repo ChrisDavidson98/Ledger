@@ -868,7 +868,9 @@ function screenSettings() {
       </div>
       <div class="btn-row">
         <button class="btn-ghost" data-action="probe-backend" ${sync.hasUrl() && !STATE.syncBusy ? '' : 'disabled'}>Check Which Version</button>
+        <button class="btn-ghost" data-action="cleanup-sheet" ${sync.isConfigured() && !STATE.syncBusy ? '' : 'disabled'}>Clean Up Sheet</button>
       </div>
+      <p class="tiny">Clean Up Sheet removes duplicated rows and any round still sitting in the live tabs after being deleted. Safe to run any time; it reports what it found.</p>
       <p class="tiny">Check Which Version asks the URL what it is serving, without needing the passphrase. Use it when two phones disagree &mdash; if they report different contract numbers, one is pointed at an older deployment.</p>
       ${STATE.syncStatus ? `<div class="${STATE.syncStatus.bad ? 'err-box' : 'ok-box'}">${esc(STATE.syncStatus.text)}</div>` : ''}
     </div>
@@ -2184,9 +2186,23 @@ const ACTIONS = {
   }),
 
   'full-pull': () => runSync('Pull', async () => {
+    // Deletions first, or a full pull hands back the very rounds this
+    // phone has just deleted.
+    await sync.pushDeletions();
     await sync.pullCourses();
     const result = await sync.pullRounds({ full: true });
     return `Pulled ${result.added} new round${result.added === 1 ? '' : 's'} of ${result.seen} on the sheet.`;
+  }),
+
+  'cleanup-sheet': () => runSync('Clean up', async () => {
+    const r = await sync.cleanup();
+    const fixed = (r.duplicateRounds || 0) + (r.duplicateShots || 0) + (r.unarchivedGhosts || 0);
+    if (!fixed) return `Nothing to fix. ${r.rounds} rounds, ${r.shots} shot rows.`;
+    const bits = [];
+    if (r.unarchivedGhosts) bits.push(`${r.unarchivedGhosts} deleted round${r.unarchivedGhosts === 1 ? '' : 's'} still showing as live`);
+    if (r.duplicateRounds) bits.push(`${r.duplicateRounds} duplicate round${r.duplicateRounds === 1 ? '' : 's'}`);
+    if (r.duplicateShots) bits.push(`${r.duplicateShots} duplicate shot row${r.duplicateShots === 1 ? '' : 's'}`);
+    return `Removed ${bits.join(', ')}. Now ${r.rounds} rounds, ${r.shots} shot rows.`;
   }),
 
   'sign-out': () => {
