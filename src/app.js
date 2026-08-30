@@ -727,6 +727,7 @@ function roundReport(round) {
 function renderRoundBreakdown(round) {
   const rounds = [round];
   const holes = playedHoles(round);
+  const holeCount = holes.length || 1;
   const gir = greensInRegulation(rounds);
   const tee = teeOutcomes(rounds);
   const putts = puttingBuckets(rounds);
@@ -741,7 +742,20 @@ function renderRoundBreakdown(round) {
   }, null);
   const worstCategory = CATEGORIES.reduce((a, b) => (totals[a] <= totals[b] ? a : b));
 
-  return `<div class="card">
+  // The same handicap read as the Stats tab, but for this round only.
+  // Scaled to 18 holes so a nine is comparable, and captioned to say
+  // plainly that one round is a thin sample for it.
+  const scale = 18 / holeCount;
+  const per18 = { total: totals.total * scale };
+  CATEGORIES.forEach((c) => { per18[c] = totals[c] * scale; });
+  const profile = handicapProfile(per18);
+
+  return `${renderHandicapCard(profile, {
+      subtitle: `This round on its own, scaled to 18 holes${holeCount !== 18 ? ` from ${holeCount}` : ''}.`,
+      caveat: 'One round is a small sample — a hot putter or two lost balls will move these more than the Stats tab, where it averages out. Useful for reading the round; use Stats for reading the game.',
+    })}
+
+    <div class="card">
       <h2>This round</h2>
       <div class="stat-grid g4">
         <div class="stat-box"><div class="val">${gir.pct}%</div><div class="lbl">Greens</div></div>
@@ -1004,43 +1018,9 @@ function screenStats() {
   const putts = puttingBuckets(rounds);
 
   return `${topbar(`${STATE.player} · Stats`)}
-    <div class="card">
-      <h2>You play like a ${fmtHandicap(profile.overall)}</h2>
-      <p class="muted">Across ${rounds.length} round${rounds.length === 1 ? '' : 's'}, ${holesPlayed} holes. Each part of your game translated to the handicap that normally plays it that well.</p>
-      <div class="card-editor">
-        <div class="hdr" style="grid-template-columns:1fr 56px 62px 58px">
-          <span>Part of the game</span>
-          <span style="text-align:center">SG/18</span>
-          <span style="text-align:center">Plays like</span>
-          <span style="text-align:center">Upside</span>
-        </div>
-        ${profile.rows.map((row) => `
-          <div class="line" style="grid-template-columns:1fr 56px 62px 58px">
-            <span>
-              <strong>${CATEGORY_LABELS[row.category]}</strong>
-              <span class="tiny">${
-                row.gapToOverall < -1 ? 'holding you back'
-                : row.gapToOverall > 1 ? 'ahead of the rest'
-                : 'in line with the rest'
-              }</span>
-            </span>
-            <span class="mono ${sgClass(row.sg)}" style="text-align:center;font-size:12px">${fmtSG(row.sg)}</span>
-            <span class="mono" style="text-align:center;font-size:13px;font-weight:700;color:${
-              row.gapToOverall < -1 ? 'var(--flag)' : row.gapToOverall > 1 ? 'var(--green-mid)' : 'var(--ink-soft)'
-            }">${fmtHandicap(row.handicap)}</span>
-            <span class="mono tiny" style="text-align:center">${
-              upsideFor(row) >= 0.1 ? '−' + upsideFor(row).toFixed(1) : '—'
-            }</span>
-          </div>`).join('')}
-      </div>
-      <p class="tiny" style="margin-top:10px">
-        <strong>Upside</strong> is the strokes per 18 you would save by lifting that part of the game to the level of the rest &mdash; not to scratch, just to your own standard.
-        ${profile.weakest && profile.weakest.gapToOverall < -1
-          ? ` Right now that is <strong>${CATEGORY_LABELS[profile.weakest.category]}</strong>, worth about ${upsideFor(profile.weakest).toFixed(1)} shots.`
-          : ' Your game is fairly even across the board.'}
-      </p>
-      <p class="tiny">The handicap conversion is a model, not a measurement. It is anchored on scoring, which is solid; the split between categories is approximate. Good for spotting the weak spot, not for arguing over a decimal.</p>
-    </div>
+    ${renderHandicapCard(profile, {
+      subtitle: `Across ${rounds.length} round${rounds.length === 1 ? '' : 's'}, ${holesPlayed} holes. Each part of your game translated to the handicap that normally plays it that well.`,
+    })}
 
     ${renderTrendCard(trendSeries(allRounds))}
 
@@ -1315,6 +1295,54 @@ function renderPuttingCard(putts) {
         </div>
         <div class="row-val ${sgClass(b.sg / b.putts)}">${fmtSG(b.sg / b.putts)}</div>
       </div>`).join('')}
+  </div>`;
+}
+
+/**
+ * Each part of the game as the handicap that normally plays it that
+ * well, with what closing the gap on the weakest one is worth.
+ *
+ * `caveat` carries whatever warning the calling screen needs — a
+ * single round is a much smaller sample than a career, and the card
+ * should say so where that applies.
+ */
+function renderHandicapCard(profile, { subtitle, caveat } = {}) {
+  return `<div class="card">
+    <h2>${profile.overall <= 0.5 ? 'You play like scratch' : `You play like a ${fmtHandicap(profile.overall)}`}</h2>
+    ${subtitle ? `<p class="muted">${subtitle}</p>` : ''}
+    <div class="card-editor">
+      <div class="hdr" style="grid-template-columns:1fr 56px 62px 58px">
+        <span>Part of the game</span>
+        <span style="text-align:center">SG/18</span>
+        <span style="text-align:center">Plays like</span>
+        <span style="text-align:center">Upside</span>
+      </div>
+      ${profile.rows.map((row) => `
+        <div class="line" style="grid-template-columns:1fr 56px 62px 58px">
+          <span>
+            <strong>${CATEGORY_LABELS[row.category]}</strong>
+            <span class="tiny">${
+              row.gapToOverall < -1 ? 'holding you back'
+              : row.gapToOverall > 1 ? 'ahead of the rest'
+              : 'in line with the rest'
+            }</span>
+          </span>
+          <span class="mono ${sgClass(row.sg)}" style="text-align:center;font-size:12px">${fmtSG(row.sg)}</span>
+          <span class="mono" style="text-align:center;font-size:13px;font-weight:700;color:${
+            row.gapToOverall < -1 ? 'var(--flag)' : row.gapToOverall > 1 ? 'var(--green-mid)' : 'var(--ink-soft)'
+          }">${fmtHandicap(row.handicap)}</span>
+          <span class="mono tiny" style="text-align:center">${
+            upsideFor(row) >= 0.1 ? '−' + upsideFor(row).toFixed(1) : '—'
+          }</span>
+        </div>`).join('')}
+    </div>
+    <p class="tiny" style="margin-top:10px">
+      <strong>Upside</strong> is the strokes per 18 saved by lifting that part of the game to the level of the rest &mdash; not to scratch, just to your own standard.
+      ${profile.weakest && profile.weakest.gapToOverall < -1
+        ? ` Here that is <strong>${CATEGORY_LABELS[profile.weakest.category]}</strong>, worth about ${upsideFor(profile.weakest).toFixed(1)} shots.`
+        : ' Fairly even across the board.'}
+    </p>
+    <p class="tiny">${caveat || 'The handicap conversion is a model, not a measurement. It is anchored on scoring, which is solid; the split between categories is approximate. Good for spotting the weak spot, not for arguing over a decimal.'}</p>
   </div>`;
 }
 
