@@ -90,6 +90,14 @@ export function fmtHandicap(value) {
   return String(Math.round(value));
 }
 
+/** The same figure where there is only room for a couple of characters. */
+export function fmtHandicapShort(value) {
+  if (value == null) return '—';
+  if (value <= 0.5) return '0';
+  if (value >= HANDICAP_RANGE.max) return `${HANDICAP_RANGE.max}+`;
+  return String(Math.round(value));
+}
+
 /**
  * A per-category read on where the game stands, sorted so the part
  * costing the most sits at the top. `gapToOverall` is the interesting

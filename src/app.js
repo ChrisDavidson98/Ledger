@@ -57,7 +57,10 @@ import * as store from './storage.js';
 import * as sync from './sync.js';
 import { missingSeeds, cloneSeed } from './seed.js';
 import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js';
-import { handicapProfile, fmtHandicap, upsideFor } from './handicap.js';
+import {
+  handicapProfile, fmtHandicap, fmtHandicapShort, upsideFor,
+  handicapForTotal, handicapForCategory,
+} from './handicap.js';
 
 import {
   newCourse,
@@ -1743,6 +1746,20 @@ const COMPARE_SECTIONS = [
     ],
   },
   {
+    // The same figures as above, translated to the scale golfers
+    // actually think in. "My putting is a 14 and his is a 7" lands in
+    // a way that "-5.01 against -5.39" does not.
+    title: 'Plays like',
+    note: 'Each part of the game as the handicap that normally plays it that well. Lower is better.',
+    metrics: [
+      { label: 'Overall', get: (s) => (s.sg ? handicapForTotal(s.sg.total) : null), fmt: fmtHandicap, better: 'lower', strong: true },
+      { label: 'Off the tee', get: (s) => (s.sg ? handicapForCategory('ott', s.sg.ott) : null), fmt: fmtHandicap, better: 'lower' },
+      { label: 'Approach', get: (s) => (s.sg ? handicapForCategory('app', s.sg.app) : null), fmt: fmtHandicap, better: 'lower' },
+      { label: 'Short game', get: (s) => (s.sg ? handicapForCategory('arg', s.sg.arg) : null), fmt: fmtHandicap, better: 'lower' },
+      { label: 'Putting', get: (s) => (s.sg ? handicapForCategory('putt', s.sg.putt) : null), fmt: fmtHandicap, better: 'lower' },
+    ],
+  },
+  {
     title: 'The basics',
     metrics: [
       { label: 'Greens', get: (s) => s.girPct, fmt: (v) => `${v}%`, better: 'higher' },
@@ -1898,10 +1915,10 @@ function renderClubhouseNotes(summaries) {
     const strong = profile.strongest;
     const weak = profile.weakest;
     return `<div class="row">
-      <div class="badge">${fmtHandicap(profile.overall)}</div>
+      <div class="badge">${fmtHandicapShort(profile.overall)}</div>
       <div class="row-meta">
         <div class="rname">${esc(s.player)}</div>
-        <div class="rsub">Strongest ${CATEGORY_LABELS[strong.category].toLowerCase()}, weakest ${CATEGORY_LABELS[weak.category].toLowerCase()}</div>
+        <div class="rsub">Strongest ${CATEGORY_LABELS[strong.category].toLowerCase()} at ${fmtHandicap(strong.handicap)}, weakest ${CATEGORY_LABELS[weak.category].toLowerCase()} at ${fmtHandicap(weak.handicap)}</div>
       </div>
       <div class="row-val ${sgClass(s.sg.total)}">${fmtSG(s.sg.total)}</div>
     </div>`;
