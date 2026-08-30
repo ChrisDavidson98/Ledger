@@ -104,17 +104,60 @@ export function applySetupLink() {
     const params = new URLSearchParams(window.location.search);
     const encoded = params.get('s');
     if (!encoded) return false;
-    if (hasUrl()) return false;
 
     const padded = encoded.replace(/-/g, '+').replace(/_/g, '/');
     const url = atob(padded);
     if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) return false;
+
+    const existing = getConfig().url;
+    if (existing === url) return false;
+
+    // A phone that already has a DIFFERENT sheet is not repointed
+    // silently — that would be a good way to lose track of where the
+    // data went. It is offered instead, and Settings asks.
+    if (existing) {
+      pendingRepoint = url;
+      return false;
+    }
 
     setConfig({ url, secret: '' });
     return true;
   } catch (err) {
     return false;
   }
+}
+
+/**
+ * A setup link arrived pointing somewhere other than where this phone
+ * is configured. Held until someone confirms — the usual cause is a
+ * redeploy that issued a new /exec URL, leaving one phone behind.
+ */
+let pendingRepoint = null;
+
+export function repointOffer() {
+  return pendingRepoint;
+}
+
+export function acceptRepoint() {
+  if (!pendingRepoint) return false;
+  setConfig({ url: pendingRepoint, secret: '' });
+  pendingRepoint = null;
+  return true;
+}
+
+export function dismissRepoint() {
+  pendingRepoint = null;
+}
+
+/** Ask a URL which version of the script it is serving. Needs no secret. */
+export async function probe(url) {
+  const target = url || getConfig().url;
+  if (!target) throw new Error('No sheet configured on this device.');
+  const response = await fetch(target, { method: 'GET', redirect: 'follow' });
+  if (!response.ok) throw new Error(`Backend returned ${response.status}.`);
+  const data = await response.json();
+  if (!data.ok) throw new Error('That URL answered, but not as Ledger.');
+  return data;
 }
 
 /**

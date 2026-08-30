@@ -852,11 +852,24 @@ function screenSettings() {
 
       <p class="tiny">This is stored on this device only, never in the repo. It stops strangers who find the URL from reading or writing your rounds. It does not stop each other &mdash; anyone with it can post as any player.</p>
 
+      ${sync.repointOffer() ? `
+        <div class="err-box">
+          A setup link opened pointing at a different sheet than this phone uses. That usually means a redeploy issued a new address and this device was left behind.
+          <div class="btn-row">
+            <button class="btn-ghost" data-action="accept-repoint">Use the new one</button>
+            <button class="btn-ghost" data-action="dismiss-repoint">Keep this one</button>
+          </div>
+        </div>` : ''}
+
       <button class="btn-primary" style="margin-top:8px" data-action="save-sync-config">Save</button>
       <div class="btn-row">
         <button class="btn-ghost" data-action="test-sync" ${STATE.syncBusy ? 'disabled' : ''}>Test Connection</button>
         <button class="btn-ghost" data-action="setup-sheets" ${STATE.syncBusy ? 'disabled' : ''}>Create Tabs</button>
       </div>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="probe-backend" ${sync.hasUrl() && !STATE.syncBusy ? '' : 'disabled'}>Check Which Version</button>
+      </div>
+      <p class="tiny">Check Which Version asks the URL what it is serving, without needing the passphrase. Use it when two phones disagree &mdash; if they report different contract numbers, one is pointed at an older deployment.</p>
       ${STATE.syncStatus ? `<div class="${STATE.syncStatus.bad ? 'err-box' : 'ok-box'}">${esc(STATE.syncStatus.text)}</div>` : ''}
     </div>
 
@@ -2133,6 +2146,21 @@ const ACTIONS = {
     if (result.deleted) bits.push(`removed ${result.deleted}`);
     return bits.join(', ') + ` round${result.pulled === 1 && result.pushed === 1 ? '' : 's'}.`;
   }),
+
+  'probe-backend': () => runSync('Version check', async () => {
+    const info = await sync.probe();
+    return `Contract ${info.contract || 'unknown'} — ${(info.actions || []).length} actions. Compare this number with the other phones.`;
+  }),
+
+  'accept-repoint': () => {
+    sync.acceptRepoint();
+    go('settings', { syncDraft: null, notice: 'Pointed at the new sheet. Enter the passphrase to unlock it.' });
+  },
+
+  'dismiss-repoint': () => {
+    sync.dismissRepoint();
+    go('settings', { syncDraft: null });
+  },
 
   'load-archive': () => runSync('Loading deleted rounds', async () => {
     STATE.archive = await sync.listArchive();

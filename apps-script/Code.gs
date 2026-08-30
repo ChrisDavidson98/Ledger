@@ -52,8 +52,24 @@ SHEETS.shots_archive = SHEETS.shots.slice();
 
 /* --- Entry points ------------------------------------------------ */
 
+/*
+ * Bump CONTRACT whenever the actions or the column layout change.
+ * doGet needs no secret, so this is the one thing that can be checked
+ * from outside to see WHICH version of the script a URL is actually
+ * serving — the difference between "the deployment is broken" and
+ * "that phone is pointed at an older deployment" is otherwise
+ * invisible from the client.
+ */
+var CONTRACT = 4;
+
 function doGet(e) {
-  return respond({ ok: true, service: 'ledger', version: 1 });
+  return respond({
+    ok: true,
+    service: 'ledger',
+    contract: CONTRACT,
+    actions: ['ping', 'setup', 'pushRounds', 'deleteRounds', 'listArchive',
+      'restoreRounds', 'pullRounds', 'pushCourses', 'pullCourses'],
+  });
 }
 
 function doPost(e) {
