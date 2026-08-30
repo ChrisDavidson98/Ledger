@@ -948,7 +948,24 @@ function screenStats() {
               <div class="tiny">${row.greens}/${row.holes}</div>
             </div>`).join('')}
         </div>
-        <p class="tiny" style="margin-top:6px">A par 5 green in regulation means on in three, so that column is always the hardest. Compare each against itself over time rather than against the others.</p>
+        ${(() => {
+          // Say what these numbers actually are, then let the player's
+          // own data name the strong and weak hole type. Which par is
+          // hardest genuinely varies by golfer — better players tend to
+          // find par 5s easiest, since the shot that has to hold the
+          // green is a wedge, while a par 3 is one mid-iron with no
+          // chance to recover. Asserting a general rule here was wrong.
+          const ranked = gir.byPar.filter((r) => r.holes >= 3).slice().sort((a, b) => b.pct - a.pct);
+          if (ranked.length < 2) {
+            return `<p class="tiny" style="margin-top:6px">On in one on a par 3, two on a par 4, three on a par 5.</p>`;
+          }
+          const best = ranked[0];
+          const worst = ranked[ranked.length - 1];
+          return `<p class="tiny" style="margin-top:6px">On in one on a par 3, two on a par 4, three on a par 5.
+            ${best.pct === worst.pct
+              ? 'Yours are even across the three so far.'
+              : `Your strongest is <strong>par ${best.par}</strong> at ${best.pct}% and your weakest <strong>par ${worst.par}</strong> at ${worst.pct}%.`}</p>`;
+        })()}
       ` : ''}
     </div>
 
