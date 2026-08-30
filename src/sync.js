@@ -196,42 +196,58 @@ function setLastPull(stamp) {
  * Apps Script cannot answer a CORS preflight, so the request must stay
  * a "simple" one: text/plain, no custom headers. The body is still JSON.
  */
+function attempt(url, body, timeout) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body,
+    redirect: 'follow',
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Retried once on a network failure, because the overwhelmingly common
+ * cause is transient: a weak signal on a course, or Apps Script cold
+ * starting after a quiet spell or a redeploy. A single retry turns most
+ * of those into a success nobody has to think about.
+ */
 async function post(action, payload = {}, { timeout = 20000 } = {}) {
   const { url, secret } = getConfig();
   if (!url || !secret) throw new Error('Sync is not configured.');
+  const body = JSON.stringify({ action, secret, ...payload });
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action, secret, ...payload }),
-      redirect: 'follow',
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`Backend returned ${response.status}.`);
-    const data = await response.json();
-    if (!data.ok) throw new Error(data.error || 'Backend rejected the request.');
-    return data;
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      throw new Error('The backend did not answer in time. Apps Script is slow on its first request after a quiet spell — try once more.');
+  let lastErr = null;
+  for (let tryNum = 0; tryNum < 2; tryNum++) {
+    try {
+      const response = await attempt(url, body, timeout);
+      if (!response.ok) throw new Error(`Backend returned ${response.status}.`);
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || 'Backend rejected the request.');
+      return data;
+    } catch (err) {
+      lastErr = err;
+      // Only network-level failures are worth repeating. A refusal
+      // from the backend will refuse identically the second time.
+      const retryable = err.name === 'AbortError' || err.name === 'TypeError';
+      if (!retryable || tryNum === 1) break;
+      await new Promise((r) => setTimeout(r, 1500));
     }
-    // A blocked request and no connection both surface as this one
-    // opaque TypeError, so say what to actually go and check.
-    if (err.name === 'TypeError') {
-      throw new Error(
-        navigator.onLine
-          ? 'Could not reach the backend. Check the URL is the deployed /exec one and that access is set to "Anyone".'
-          : 'No connection. Rounds stay saved on this phone and upload once you have signal.'
-      );
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
   }
+
+  if (!navigator.onLine) {
+    throw new Error('No connection. Everything stays saved on this phone and uploads once you have signal.');
+  }
+  if (lastErr && (lastErr.name === 'AbortError' || lastErr.name === 'TypeError')) {
+    // Deliberately does not name a cause. The app cannot tell a weak
+    // signal from a misconfigured URL, and an earlier version of this
+    // message asserted the URL was wrong and sent someone hunting for
+    // a problem that did not exist.
+    throw new Error('Could not reach the sheet — tried twice. Usually a weak signal or the backend waking up, so try again in a moment. If it keeps failing, Check Which Version in Settings will say whether the URL is reachable at all.');
+  }
+  throw lastErr;
 }
 
 export function ping() {
