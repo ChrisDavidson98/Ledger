@@ -32,6 +32,8 @@ import {
   roundPar,
   roundToPar,
   playedHoles,
+  sgRounds,
+  isScoreOnly,
   isRoundComplete,
   nextUnplayedHole,
   relinkHole,
@@ -84,6 +86,7 @@ const STATE = {
   comboDraft: null,
   setupCourseId: null, // course chosen, awaiting a tee and layout
   setupTee: null,
+  setupMode: 'full',
   viewRoundId: null,
   loginDraft: '',
   importText: '',
@@ -169,7 +172,7 @@ const NAV = [
 ];
 
 const NAV_GROUPS = {
-  home: ['home', 'setup', 'play', 'summary'],
+  home: ['home', 'setup', 'play', 'scorecard', 'summary'],
   history: ['history', 'detail', 'settings'],
   stats: ['stats'],
   courses: ['courses', 'courseEdit', 'courseImport'],
@@ -317,6 +320,8 @@ function screenPickTee() {
       <div class="row-val">&rsaquo;</div>
     </button>`;
 
+  const mode = STATE.setupMode || 'full';
+
   return `${topbar(course.name)}
     ${notices()}
     <div class="card">
@@ -326,6 +331,15 @@ function screenPickTee() {
           <button class="chip ${name === tee ? 'active' : ''}" data-setup-tee="${esc(name)}">${esc(name)}</button>
         `).join('')}
       </div>
+
+      <label>What are you tracking?</label>
+      <div class="chip-grid g2">
+        <button class="chip ${mode === 'full' ? 'active' : ''}" data-setup-mode="full">Every shot</button>
+        <button class="chip ${mode === 'score' ? 'active' : ''}" data-setup-mode="score">Score only</button>
+      </div>
+      <p class="tiny">${mode === 'score'
+        ? 'Just the number on each hole. Counts for scoring, the trend and the head-to-head, but sits out of strokes gained &mdash; there are no shots to measure.'
+        : 'Shot by shot, which is what strokes gained needs.'}</p>
     </div>
 
     ${eighteens.length ? `
@@ -341,6 +355,78 @@ function screenPickTee() {
     </div>
 
     <button class="btn-ghost" data-action="edit-course" data-id="${esc(course.id)}">Edit Scorecard</button>`;
+}
+
+/**
+ * Score-only entry: the whole card on one screen.
+ *
+ * Every hole starts at par, so the taps go on the holes that were not
+ * pars — which is most of them, but rarely by much. Faster than
+ * walking hole by hole, and this is entered after the round from a
+ * paper card rather than out on the course.
+ */
+function screenScoreCard() {
+  const round = STATE.round;
+  if (!round) return screenHome();
+  const holes = round.holes;
+  const scored = holes.filter((h) => h.score != null);
+  const total = scored.reduce((sum, h) => sum + h.score, 0);
+  // Only the holes with a score count toward par, so the running
+  // total reads correctly part way through rather than showing the
+  // whole card's par against nothing.
+  const par = scored.reduce((sum, h) => sum + h.par, 0);
+  const entered = scored.length;
+
+  return `${topbar(`${round.courseName} · ${round.teeName}`)}
+    ${notices()}
+    <div class="card">
+      <div class="split">
+        <h2>Score only</h2>
+        <span class="tiny">${entered}/${holes.length} holes</span>
+      </div>
+      <p class="muted">Scores just for the card. No shots, so this round sits out of every strokes-gained figure &mdash; it still counts for scoring, the trend and the head-to-head.</p>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="val">${entered ? total : '&ndash;'}</div><div class="lbl">Total</div></div>
+        <div class="stat-box"><div class="val">${entered ? fmtToPar(total - par) : '&ndash;'}</div><div class="lbl">To par</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-editor">
+        <div class="hdr" style="grid-template-columns:26px 1fr 118px">
+          <span>#</span><span>Par</span><span style="text-align:center">Score</span>
+        </div>
+        ${holes.map((h, i) => {
+          const score = h.score;
+          const diff = score == null ? null : score - h.par;
+          const colour = diff == null ? 'var(--ink-faint)'
+            : diff < 0 ? 'var(--green-mid)' : diff > 0 ? 'var(--flag)' : 'var(--ink)';
+          return `<div class="line" style="grid-template-columns:26px 1fr 118px">
+            <span class="hno">${h.hole}</span>
+            <span class="tiny">par ${h.par} &middot; ${h.yards}y</span>
+            <span style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
+              <button class="chip" data-score-step="-1" data-hole="${i}"
+                      style="min-height:36px;width:36px;padding:0;font-size:18px">&minus;</button>
+              <span class="mono" style="min-width:26px;text-align:center;font-size:17px;font-weight:700;color:${colour}">${
+                score == null ? '&ndash;' : score
+              }</span>
+              <button class="chip" data-score-step="1" data-hole="${i}"
+                      style="min-height:36px;width:36px;padding:0;font-size:18px">+</button>
+            </span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="card">
+      <button class="btn-flag" data-action="save-score-round" ${entered ? '' : 'disabled'}>
+        Save Round${entered && entered < holes.length ? ` (${entered} holes)` : ''}
+      </button>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="fill-par">Fill Blanks with Par</button>
+        <button class="btn-danger" data-action="discard-round">Discard</button>
+      </div>
+    </div>`;
 }
 
 function screenPlay() {
@@ -578,24 +664,32 @@ function roundReport(round) {
       <p class="muted">${fmtDate(round.date)} &middot; ${esc(round.teeName)} tees &middot; ${esc(round.player)}<br>
         ${holes.length} holes &middot; ${score} strokes (${fmtToPar(roundToPar(round))})</p>
       <div class="fairway-divider"></div>
-      <div class="stat-grid g4">
-        ${CATEGORIES.map((c) => `
-          <div class="stat-box">
-            <div class="val ${sgClass(totals[c])}">${fmtSG(totals[c])}</div>
-            <div class="lbl">${CATEGORY_SHORT[c]}</div>
-          </div>`).join('')}
-      </div>
-      <div style="text-align:center;margin-top:14px">
-        <div class="muted">Total strokes gained</div>
-        <div class="display ${sgClass(totals.total)}" style="font-size:32px">${fmtSG(totals.total)}</div>
-        <div class="tiny">vs. tour baseline</div>
-      </div>
+      ${isScoreOnly(round) ? `
+        <div class="stat-grid">
+          <div class="stat-box"><div class="val">${score}</div><div class="lbl">Score</div></div>
+          <div class="stat-box"><div class="val">${fmtToPar(roundToPar(round))}</div><div class="lbl">To par</div></div>
+        </div>
+        <p class="tiny" style="margin-top:10px">Score only &mdash; no shots were logged, so this round has no strokes gained and is left out of every average. It still counts for scoring and the trend.</p>
+      ` : `
+        <div class="stat-grid g4">
+          ${CATEGORIES.map((c) => `
+            <div class="stat-box">
+              <div class="val ${sgClass(totals[c])}">${fmtSG(totals[c])}</div>
+              <div class="lbl">${CATEGORY_SHORT[c]}</div>
+            </div>`).join('')}
+        </div>
+        <div style="text-align:center;margin-top:14px">
+          <div class="muted">Total strokes gained</div>
+          <div class="display ${sgClass(totals.total)}" style="font-size:32px">${fmtSG(totals.total)}</div>
+          <div class="tiny">vs. tour baseline</div>
+        </div>
+      `}
     </div>
-    ${renderRoundBreakdown(round)}
+    ${isScoreOnly(round) ? '' : renderRoundBreakdown(round)}
 
     <div class="card">
       <h2>Hole by hole</h2>
-      <p class="muted">Tap a hole to see the shots.</p>
+      <p class="muted">${isScoreOnly(round) ? 'Scores as entered.' : 'Tap a hole to see the shots.'}</p>
       ${holes.map((h) => {
         const t = holeTotals(h);
         const s = holeScore(h);
@@ -690,9 +784,13 @@ function screenHistory() {
           <div class="badge">${fmtToPar(roundToPar(r))}</div>
           <div class="row-meta">
             <div class="rname">${esc(r.courseName)}${everyone ? ` <span class="tiny">${esc(r.player)}</span>` : ''}</div>
-            <div class="rsub">${fmtDate(r.date)} &middot; ${esc(r.teeName)} &middot; ${roundScore(r)} strokes</div>
+            <div class="rsub">${fmtDate(r.date)} &middot; ${esc(r.teeName)} &middot; ${roundScore(r)} strokes${
+              isScoreOnly(r) ? ' &middot; score only' : ''
+            }</div>
           </div>
-          <div class="row-val ${sgClass(roundTotals(r).total)}">${fmtSG(roundTotals(r).total)}</div>
+          <div class="row-val ${isScoreOnly(r) ? '' : sgClass(roundTotals(r).total)}">${
+            isScoreOnly(r) ? '<span class="tiny">no SG</span>' : fmtSG(roundTotals(r).total)
+          }</div>
         </button>`).join('')}
     </div>
 
@@ -860,14 +958,29 @@ function screenDetail() {
 }
 
 function screenStats() {
-  const rounds = playerRounds();
-  if (rounds.length === 0) {
+  const allRounds = playerRounds();
+  // Everything strokes-gained is computed from rounds that actually
+  // carry shots. A score-only round has none, so including it would
+  // dilute every average toward zero.
+  const rounds = sgRounds(allRounds);
+  const scoreOnlyCount = allRounds.length - rounds.length;
+
+  if (allRounds.length === 0) {
     return `${topbar(`${STATE.player} · Stats`)}
       <div class="card">
         <div class="empty">
           <div class="glyph">&#128200;</div>
           <div>Play a round and the patterns show up here.</div>
         </div>
+      </div>`;
+  }
+
+  if (rounds.length === 0) {
+    return `${topbar(`${STATE.player} · Stats`)}
+      ${renderTrendCard(trendSeries(allRounds), 'toPar')}
+      <div class="card">
+        <h2>No shot data yet</h2>
+        <p class="muted">All ${allRounds.length} of your rounds are score only, so there is nothing to measure against the baseline. Track one round shot by shot and the rest of this page fills in.</p>
       </div>`;
   }
 
@@ -929,7 +1042,7 @@ function screenStats() {
       <p class="tiny">The handicap conversion is a model, not a measurement. It is anchored on scoring, which is solid; the split between categories is approximate. Good for spotting the weak spot, not for arguing over a decimal.</p>
     </div>
 
-    ${renderTrendCard(trendSeries(rounds))}
+    ${renderTrendCard(trendSeries(allRounds))}
 
     <div class="card">
       <h2>The basics</h2>
@@ -994,7 +1107,7 @@ function screenStats() {
 
     ${renderMissCard('Tee shot misses', teeMiss)}
     ${renderMissCard('Approach misses', appMiss)}
-    ${renderBestsCard(personalBests(rounds))}
+    ${renderBestsCard(personalBests(rounds), allRounds)}
     ${renderComparison()}`;
 }
 
@@ -1003,7 +1116,7 @@ function screenStats() {
  * weekday nine compares honestly against a full Saturday round.
  */
 function renderComparison() {
-  const everyone = store.getRounds();
+  const everyone = sgRounds(store.getRounds());
   const players = [...new Set(everyone.map((r) => r.player))].filter(Boolean);
   if (players.length < 2) return '';
 
@@ -1059,15 +1172,26 @@ function renderComparison() {
  * is one line and a zero rule, it inherits the theme through CSS
  * variables, and it keeps the app dependency-free and offline.
  */
-function renderTrendCard(series) {
+function renderTrendCard(allSeries, forcedKey) {
+  const key = forcedKey || STATE.trendKey || 'total';
+  // Score is the one measure a score-only round can contribute to.
+  const series = key === 'toPar' ? allSeries : allSeries.filter((p) => !p.scoreOnly);
+  const excluded = allSeries.length - series.length;
+
   if (series.length < 2) {
-    return series.length === 1 ? `<div class="card">
+    return series.length === 1 || allSeries.length ? `<div class="card">
       <h2>Trend</h2>
-      <p class="muted">One round in. A second will start the line.</p>
+      <p class="muted">${series.length === 1
+        ? 'One round in. A second will start the line.'
+        : 'No rounds with shot data yet — switch to Score to include score-only rounds.'}</p>
+      ${allSeries.length > 1 ? `<div class="chip-grid" style="grid-template-columns:repeat(6,1fr);gap:6px">
+        ${[['toPar', 'Score'], ['total', 'Total'], ...CATEGORIES.map((c) => [c, CATEGORY_SHORT[c]])].map(([k, label]) => `
+          <button class="chip ${key === k ? 'active' : ''}" data-trend="${k}"
+                  style="padding:7px 0;font-size:11px;min-height:36px">${label}</button>`).join('')}
+      </div>` : ''}
     </div>` : '';
   }
 
-  const key = STATE.trendKey || 'total';
   const values = series.map((p) => p[key]);
   const W = 320;
   const H = 132;
@@ -1100,10 +1224,10 @@ function renderTrendCard(series) {
       <h2>Trend</h2>
       <span class="tiny">${series.length} rounds</span>
     </div>
-    <div class="chip-grid" style="grid-template-columns:repeat(5,1fr);gap:6px">
-      ${[['total', 'Total'], ...CATEGORIES.map((c) => [c, CATEGORY_SHORT[c]])].map(([k, label]) => `
+    <div class="chip-grid" style="grid-template-columns:repeat(6,1fr);gap:6px">
+      ${[['toPar', 'Score'], ['total', 'Total'], ...CATEGORIES.map((c) => [c, CATEGORY_SHORT[c]])].map(([k, label]) => `
         <button class="chip ${key === k ? 'active' : ''}" data-trend="${k}"
-                style="padding:7px 0;font-size:12px;min-height:38px">${label}</button>
+                style="padding:7px 0;font-size:11px;min-height:36px">${label}</button>
       `).join('')}
     </div>
 
@@ -1143,7 +1267,9 @@ function renderTrendCard(series) {
         <div class="lbl">Since first</div>
       </div>
     </div>
-    <p class="tiny" style="margin-top:8px">Per 18 holes, so nines sit on the same scale. Higher is better; the dashed line is tour average.</p>
+    <p class="tiny" style="margin-top:8px">Per 18 holes, so nines sit on the same scale. Higher is better; the dashed line is ${
+      key === 'toPar' ? 'level par (shown inverted, so up is still better)' : 'tour average'
+    }.${excluded ? ` ${excluded} score-only round${excluded === 1 ? '' : 's'} left out — switch to Score to include ${excluded === 1 ? 'it' : 'them'}.` : ''}</p>
   </div>`;
 }
 
@@ -1228,9 +1354,16 @@ function renderApproachCard(buckets) {
   </div>`;
 }
 
-function renderBestsCard(bests) {
+function renderBestsCard(bests, allRounds) {
   const items = [];
   const when = (b) => `${esc(b.course)} &middot; hole ${b.hole}`;
+
+  // Best round is about scoring, so a score-only round is eligible
+  // even though it can contribute to nothing else here.
+  const scoringBest = personalBests(allRounds || []).bestRound;
+  if (scoringBest && (!bests.bestRound || scoringBest.toPar < bests.bestRound.toPar)) {
+    bests = { ...bests, bestRound: scoringBest };
+  }
 
   if (bests.longestDrive) {
     items.push([`${bests.longestDrive.yards}y`, 'Longest drive', when(bests.longestDrive)]);
@@ -1509,6 +1642,7 @@ const SCREENS = {
   home: screenHome,
   setup: () => (STATE.setupCourseId ? screenPickTee() : screenSetup()),
   play: screenPlay,
+  scorecard: screenScoreCard,
   summary: screenSummary,
   history: screenHistory,
   detail: screenDetail,
@@ -1664,6 +1798,12 @@ function safeCourse(id) {
   return course ? repairCourse(course) : null;
 }
 
+/** Where an in-progress round should resume: shot entry or the card. */
+function activeScreen() {
+  if (!STATE.round || isRoundComplete(STATE.round)) return 'home';
+  return isScoreOnly(STATE.round) ? 'scorecard' : 'play';
+}
+
 function playerRounds() {
   return store.getRounds().filter((r) => r.player === STATE.player);
 }
@@ -1792,6 +1932,7 @@ function startRound(optionKey) {
     return;
   }
 
+  const mode = STATE.setupMode || 'full';
   STATE.round = newRound({
     player: STATE.player,
     courseId: course.id,
@@ -1799,12 +1940,13 @@ function startRound(optionKey) {
     teeName: tee,
     layout: option.label,
     holes: buildRoundHoles(course, option, tee),
+    mode,
   });
   STATE.holeIdx = 0;
   STATE.draft = {};
   STATE.setupCourseId = null;
   store.saveActiveRound(STATE.round);
-  go('play');
+  go(mode === 'score' ? 'scorecard' : 'play');
 }
 
 function saveCourseDraft() {
@@ -1978,7 +2120,7 @@ const ACTIONS = {
     STATE.passDraft = '';
     store.setPlayer(matched);
     loadActiveRound();
-    go(STATE.round && !isRoundComplete(STATE.round) ? 'play' : 'home');
+    go(activeScreen());
     sync.clearSetupParam();
     sync.syncInBackground(refreshIfIdle, { force: true });
   },
@@ -2002,7 +2144,7 @@ const ACTIONS = {
     STATE.round = null;
     go('login', { notice: null });
   },
-  resume: () => go('play'),
+  resume: () => go(activeScreen()),
   'discard-round': () => {
     if (!confirm('Discard the round in progress? This cannot be undone.')) return;
     store.clearActiveRound();
@@ -2016,6 +2158,20 @@ const ACTIONS = {
     setupCourseId: el.getAttribute('data-id'), setupTee: null,
   }),
   'start-round': (el) => startRound(el.getAttribute('data-option')),
+  'fill-par': () => {
+    STATE.round.holes.forEach((h) => { if (h.score == null) h.score = h.par; });
+    store.saveActiveRound(STATE.round);
+    render();
+  },
+
+  'save-score-round': () => {
+    const played = STATE.round.holes.filter((h) => h.score != null).length;
+    if (!played) return;
+    if (played < STATE.round.holes.length
+      && !confirm(`Only ${played} holes have a score. Save it as a ${played}-hole round?`)) return;
+    finishRound();
+  },
+
   'save-shot': saveShot,
   'delete-shot': deleteShot,
   'cancel-edit': () => { STATE.editShotIdx = null; STATE.draft = {}; render(); },
@@ -2175,7 +2331,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-set-theme],[data-presets],[data-open-hole],[data-trend]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-set-theme],[data-presets],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step]');
   if (!target) return;
 
   const verified = target.getAttribute('data-verified');
@@ -2229,7 +2385,7 @@ function onClick(event) {
   if (nav) {
     // Tapping Play during a round returns you to the hole you are on,
     // rather than the start-a-round screen.
-    if (nav === 'home' && STATE.round && !isRoundComplete(STATE.round)) return go('play');
+    if (nav === 'home' && STATE.round && !isRoundComplete(STATE.round)) return go(activeScreen());
     return go(nav);
   }
 
@@ -2255,6 +2411,22 @@ function onClick(event) {
   const penalty = target.getAttribute('data-penalty');
   if (penalty !== null) {
     STATE.draft.penalty = Number(penalty);
+    return render();
+  }
+
+  const setupMode = target.getAttribute('data-setup-mode');
+  if (setupMode) {
+    STATE.setupMode = setupMode;
+    return render();
+  }
+
+  const scoreStep = target.getAttribute('data-score-step');
+  if (scoreStep !== null) {
+    const hole = STATE.round.holes[Number(target.getAttribute('data-hole'))];
+    // First tap on an untouched hole lands on par, then adjusts from there.
+    const current = hole.score == null ? hole.par : hole.score + Number(scoreStep);
+    hole.score = Math.max(1, Math.min(20, current));
+    store.saveActiveRound(STATE.round);
     return render();
   }
 
@@ -2326,7 +2498,7 @@ function init() {
   STATE.player = store.getPlayer();
   if (STATE.player) {
     loadActiveRound();
-    STATE.screen = STATE.round && !isRoundComplete(STATE.round) ? 'play' : 'home';
+    STATE.screen = activeScreen();
   } else {
     STATE.screen = 'login';
   }

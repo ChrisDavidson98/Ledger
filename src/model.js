@@ -17,15 +17,25 @@ import {
 
 export { unitForLie };
 
-export function newRound({ player, courseId, courseName, teeName, layout, holes }) {
+/**
+ * `mode` is 'full' for shot-by-shot, or 'score' for a round where
+ * only the hole scores were kept.
+ *
+ * A score-only round earns its place in score history, the trend and
+ * the head-to-head, and is excluded from every strokes-gained figure —
+ * it has no shots, and inventing them from a score would quietly
+ * corrupt the one number the app exists to produce.
+ */
+export function newRound({ player, courseId, courseName, teeName, layout, holes, mode = 'full' }) {
   return {
     id: 'r_' + Date.now().toString(36),
-    schema: 2,
+    schema: 3,
     player,
     courseId,
     courseName,
     teeName,
     layout: layout || null, // which nine or pairing was played
+    mode,
     date: new Date().toISOString(),
     finishedAt: null,
     holes: holes.map((h) => ({
@@ -37,9 +47,20 @@ export function newRound({ player, courseId, courseName, teeName, layout, holes 
       sourceNine: h.sourceNine || null,
       sourceHole: h.sourceHole || h.hole,
       shots: [],
+      // Only used in score mode; null means the hole was not played.
+      score: null,
       done: false,
     })),
   };
+}
+
+export function isScoreOnly(round) {
+  return round && round.mode === 'score';
+}
+
+/** Rounds that carry shot data, and so can contribute to strokes gained. */
+export function sgRounds(rounds) {
+  return rounds.filter((r) => !isScoreOnly(r));
 }
 
 /**
@@ -158,12 +179,16 @@ export function roundTotals(round, baseline = 'tour') {
 
 /** Strokes on a hole: shots played plus any penalty strokes incurred. */
 export function holeScore(hole) {
+  if (hole.score != null && !hole.shots.length) return hole.score;
   return hole.shots.reduce((sum, s) => sum + 1 + (s.penalty || 0), 0);
 }
 
-/** Holes with at least one shot logged. Lets a 9-hole round score correctly. */
+/**
+ * Holes actually played — those with shots logged, or with a score
+ * entered on a score-only round. Lets a 9-hole round score correctly.
+ */
 export function playedHoles(round) {
-  return round.holes.filter((h) => h.shots.length > 0);
+  return round.holes.filter((h) => h.shots.length > 0 || h.score != null);
 }
 
 export function roundScore(round) {
@@ -376,6 +401,7 @@ export function greensInRegulation(rounds) {
  */
 export function trendSeries(rounds, baseline = 'tour') {
   return rounds
+    .filter((r) => playedHoles(r).length > 0)
     .slice()
     .sort((a, b) => new Date(a.date) - new Date(b.date))
     .map((round) => {
@@ -386,9 +412,11 @@ export function trendSeries(rounds, baseline = 'tour') {
         id: round.id,
         date: round.date,
         courseName: round.courseName,
+        scoreOnly: isScoreOnly(round),
         holes,
         score: roundScore(round),
-        toPar: roundToPar(round),
+        // Negated so that, like every other series here, up is better.
+        toPar: -roundToPar(round) * scale,
         total: totals.total * scale,
       };
       CATEGORIES.forEach((c) => { point[c] = totals[c] * scale; });
