@@ -1434,7 +1434,6 @@ function renderBestsCard(bests, allRounds) {
         </div>
         <div class="row-val" style="font-size:17px;color:var(--green-mid)">${value}</div>
       </div>`).join('')}
-    ${bests.longestDrive ? `<p class="tiny" style="margin-top:8px">Drive distance is yardage taken off the card, not carry. Rough and fairway bunkers count &mdash; the ball was still struck that far &mdash; but a penalty or a trip into the trees does not. A hole's yardage runs along the centre of the fairway, so cutting a dogleg reads longer than the ball actually went.</p>` : ''}
   </div>`;
 }
 
