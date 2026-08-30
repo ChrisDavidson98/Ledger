@@ -12,7 +12,7 @@
    baseline tables do.
 --------------------------------------------------------------- */
 
-import { shotSG, roundTotals, roundScore, roundPar, playedHoles } from './model.js';
+import { shotSG, roundTotals, roundScore, roundPar, playedHoles, holeScore } from './model.js';
 import * as store from './storage.js';
 
 const CONFIG_KEY = 'ledger:sync_config';
@@ -216,6 +216,7 @@ export function flattenRound(round) {
     course_id: round.courseId || '',
     course_name: round.courseName,
     tee_name: round.teeName,
+    mode: round.mode || 'full',
     holes_played: holes.length,
     score: roundScore(round),
     par: roundPar(round),
@@ -229,17 +230,37 @@ export function flattenRound(round) {
 
   const shots = [];
   holes.forEach((hole) => {
+    const common = {
+      round_id: round.id,
+      player: round.player,
+      date: round.date,
+      course_name: round.courseName,
+      tee_name: round.teeName,
+      hole: hole.hole,
+      par: hole.par,
+      hole_yards: hole.yards,
+      hole_score: holeScore(hole),
+    };
+
+    // A score-only hole has no shots to write, so it gets a single
+    // row carrying the score. Otherwise its hole-by-hole detail would
+    // live nowhere but the phone that entered it, and the pull — which
+    // rebuilds rounds from these rows — would never see the round.
+    if (!hole.shots.length) {
+      shots.push({
+        ...common,
+        shot_num: 0,
+        start_lie: '', start_dist: '', start_unit: '',
+        end_lie: '', end_dist: '', end_unit: '',
+        holed: '', penalty: 0, miss: '', category: 'score', sg: '',
+      });
+      return;
+    }
+
     hole.shots.forEach((shot) => {
       const { category, sg } = shotSG(shot, hole.par);
       shots.push({
-        round_id: round.id,
-        player: round.player,
-        date: round.date,
-        course_name: round.courseName,
-        tee_name: round.teeName,
-        hole: hole.hole,
-        par: hole.par,
-        hole_yards: hole.yards,
+        ...common,
         shot_num: shot.n,
         start_lie: shot.startLie,
         start_dist: shot.startDist,
@@ -266,6 +287,7 @@ function round2(value) {
 /** Rebuild a round object from the flat rows the sheet returns. */
 export function rebuildRound(summaryRow, shotRows) {
   const byHole = new Map();
+  const mode = String(summaryRow.mode || 'full') === 'score' ? 'score' : 'full';
 
   shotRows
     .slice()
@@ -278,12 +300,22 @@ export function rebuildRound(summaryRow, shotRows) {
           par: Number(row.par),
           yards: Number(row.hole_yards),
           shots: [],
+          score: null,
           done: false,
         });
       }
+      const hole = byHole.get(holeNum);
+
+      // shot_num 0 is a score-only hole: a score and nothing else.
+      if (Number(row.shot_num) === 0) {
+        const score = Number(row.hole_score);
+        hole.score = Number.isFinite(score) && score > 0 ? score : null;
+        hole.done = hole.score != null;
+        return;
+      }
+
       const holed = String(row.holed).toLowerCase() === 'yes'
         || String(row.holed).toLowerCase() === 'true';
-      const hole = byHole.get(holeNum);
       hole.shots.push({
         n: Number(row.shot_num),
         startLie: String(row.start_lie),
@@ -301,7 +333,8 @@ export function rebuildRound(summaryRow, shotRows) {
 
   return {
     id: String(summaryRow.round_id),
-    schema: 1,
+    schema: 3,
+    mode,
     player: String(summaryRow.player),
     courseId: summaryRow.course_id ? String(summaryRow.course_id) : null,
     courseName: String(summaryRow.course_name),
@@ -363,8 +396,10 @@ export async function pullRounds({ full = false } = {}) {
     // Never let the server overwrite a round we have not pushed yet.
     if (pending.has(id)) return;
     const rows = shotsByRound.get(id) || [];
+    // A round with no rows at all is a partial write, not a real round.
     if (!rows.length) return;
     const round = rebuildRound(summaryRow, rows);
+    if (!playedHoles(round).length) return;
     if (!localIds.has(id)) added += 1;
     store.replaceRound(round);
   });

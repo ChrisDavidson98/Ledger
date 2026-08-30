@@ -20,12 +20,15 @@ var SECRET_PROPERTY = 'LEDGER_SECRET';
 var SHEETS = {
   rounds: [
     'round_id', 'player', 'date', 'finished_at', 'course_id', 'course_name',
-    'tee_name', 'holes_played', 'score', 'par', 'to_par',
+    'tee_name', 'mode', 'holes_played', 'score', 'par', 'to_par',
     'sg_ott', 'sg_app', 'sg_arg', 'sg_putt', 'sg_total', 'updated_at',
   ],
+  // A score-only round has no shots, so it writes one row per hole
+  // with shot_num 0 carrying just the score. Without that its
+  // hole-by-hole detail existed nowhere but the phone that entered it.
   shots: [
     'round_id', 'player', 'date', 'course_name', 'tee_name',
-    'hole', 'par', 'hole_yards', 'shot_num',
+    'hole', 'par', 'hole_yards', 'hole_score', 'shot_num',
     'start_lie', 'start_dist', 'start_unit',
     'end_lie', 'end_dist', 'end_unit',
     'holed', 'penalty', 'miss', 'category', 'sg',
@@ -117,7 +120,54 @@ function sheetFor(name) {
     sheet = ss.insertSheet(name);
     sheet.appendRow(SHEETS[name]);
     sheet.setFrozenRows(1);
+    return sheet;
   }
+  return migrateHeaders(sheet, name);
+}
+
+/**
+ * Bring an existing tab up to the current column list.
+ *
+ * Adding a column to SHEETS would otherwise silently corrupt a live
+ * sheet: writes use the new column count while the stored rows are
+ * still in the old order, so every value lands one cell out. This
+ * re-maps existing rows BY HEADER NAME into the new layout, so columns
+ * can be added or reordered safely and old data keeps its meaning.
+ */
+function migrateHeaders(sheet, name) {
+  var wanted = SHEETS[name];
+  var lastCol = Math.max(sheet.getLastColumn(), 1);
+  var current = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(function (h) { return String(h || ''); });
+
+  var same = current.length === wanted.length && wanted.every(function (h, i) {
+    return current[i] === h;
+  });
+  if (same) return sheet;
+
+  var lastRow = sheet.getLastRow();
+  var rows = lastRow > 1
+    ? sheet.getRange(2, 1, lastRow - 1, lastCol).getValues()
+    : [];
+
+  var remapped = rows.map(function (row) {
+    return wanted.map(function (header) {
+      var idx = current.indexOf(header);
+      if (idx === -1) return '';
+      var v = row[idx];
+      return v === undefined || v === null ? '' : v;
+    });
+  }).filter(function (row) {
+    // Drop rows that were entirely blank padding.
+    return row.some(function (c) { return c !== ''; });
+  });
+
+  sheet.clear();
+  sheet.getRange(1, 1, 1, wanted.length).setValues([wanted]);
+  if (remapped.length) {
+    sheet.getRange(2, 1, remapped.length, wanted.length).setValues(remapped);
+  }
+  sheet.setFrozenRows(1);
   return sheet;
 }
 
