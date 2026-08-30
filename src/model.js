@@ -452,28 +452,43 @@ export function personalBests(rounds, baseline = 'tour') {
         const { category } = shotSG(shot, hole.par, baseline);
         const context = { ...where, hole: hole.hole, par: hole.par };
 
-        // How far the shot actually travelled, in yards.
-        if (!shot.holed && shot.startUnit === 'y' && shot.endDist != null) {
+        const clean = !shot.penalty;
+
+        /*
+         * Distance advanced off the tee, which is NOT the same as how
+         * far the ball was hit. Hole yardage is measured along the
+         * centreline, so cutting a dogleg removes more yardage from
+         * the card than the ball actually travelled. Nothing in the
+         * data says which holes bend, so the figure is biased upward
+         * and cannot be corrected — see the note in the UI.
+         *
+         * Restricting it to clean drives that finished in the fairway
+         * or on the green removes the worst of the nonsense: a drive
+         * into trouble followed by a drop was scoring a huge number
+         * for a ball that was never in play.
+         */
+        if (category === 'ott' && clean && !shot.holed && shot.endDist != null
+          && (shot.endLie === 'fairway' || shot.endLie === 'green')) {
           const endYards = shot.endUnit === 'ft' ? shot.endDist / 3 : shot.endDist;
           const carried = shot.startDist - endYards;
-          if (category === 'ott' && carried > 0) {
-            consider('longestDrive', { ...context, yards: Math.round(carried) },
+          if (carried > 0) {
+            consider('longestDrive', { ...context, yards: Math.round(carried), endLie: shot.endLie },
               (a, b) => a.yards > b.yards);
           }
         }
 
-        if (category === 'app' && !shot.holed && shot.endLie === 'green') {
+        if (category === 'app' && clean && !shot.holed && shot.endLie === 'green') {
           consider('closestApproach',
             { ...context, feet: shot.endDist, from: Math.round(shot.startDist) },
             (a, b) => a.feet < b.feet);
         }
 
-        if (shot.holed && shot.startLie === 'green') {
+        if (shot.holed && clean && shot.startLie === 'green') {
           consider('longestPutt', { ...context, feet: shot.startDist },
             (a, b) => a.feet > b.feet);
         }
 
-        if (shot.holed && shot.startLie !== 'green' && shot.startUnit === 'y') {
+        if (shot.holed && clean && shot.startLie !== 'green' && shot.startUnit === 'y') {
           consider('longestHoleOut', { ...context, yards: Math.round(shot.startDist) },
             (a, b) => a.yards > b.yards);
         }

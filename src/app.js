@@ -1394,7 +1394,8 @@ function renderBestsCard(bests, allRounds) {
   }
 
   if (bests.longestDrive) {
-    items.push([`${bests.longestDrive.yards}y`, 'Longest drive', when(bests.longestDrive)]);
+    items.push([`${bests.longestDrive.yards}y`, 'Longest drive in play',
+      `${when(bests.longestDrive)} &middot; found the ${bests.longestDrive.endLie}`]);
   }
   if (bests.closestApproach) {
     items.push([`${Math.round(bests.closestApproach.feet)}ft`, 'Closest approach',
@@ -1426,6 +1427,7 @@ function renderBestsCard(bests, allRounds) {
         </div>
         <div class="row-val" style="font-size:17px;color:var(--green-mid)">${value}</div>
       </div>`).join('')}
+    ${bests.longestDrive ? `<p class="tiny" style="margin-top:8px">Drive distance is yardage taken off the card, not carry, and only counts drives that finished in play. A hole's yardage runs along the centre of the fairway, so cutting a dogleg reads longer than the ball actually went.</p>` : ''}
   </div>`;
 }
 
