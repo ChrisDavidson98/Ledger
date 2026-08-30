@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ledger — Tests</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  body { padding: 16px; }
+  .t { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--cream); font-size: 13px; }
+  .t .mark { width: 18px; flex-shrink: 0; font-weight: 700; }
+  .t.pass .mark { color: var(--green-mid); }
+  .t.fail .mark { color: var(--flag); }
+  .t .why { color: var(--flag); font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+  .group { font-family: "Zilla Slab", serif; font-weight: 600; margin: 18px 0 4px; color: var(--green-deep); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+/* ---------------------------------------------------------------
+   tests.html — open this in a browser. No install, no build.
+
+   These exist because three of the first four backend redeploys were
+   fixing bugs a round-trip check would have caught in a second: a
+   score-only round syncing to nowhere, deletions that did not delete,
+   and rounds existing as live and archived at once. Each of those was
+   verified by hand in a console at the time and then thrown away.
+--------------------------------------------------------------- */
+
+import * as B from './src/baseline.js';
+import * as M from './src/model.js';
+import * as S from './src/sync.js';
+import * as C from './src/courses.js';
+import * as I from './src/import.js';
+import * as H from './src/handicap.js';
+import { SEED_COURSES } from './src/seed.js';
+
+const results = [];
+let group = '';
+
+function suite(name) { group = name; }
+
+function check(name, fn) {
+  try {
+    const problem = fn();
+    results.push({ group, name, ok: !problem, why: problem || '' });
+  } catch (err) {
+    results.push({ group, name, ok: false, why: err.message });
+  }
+}
+
+const near = (a, b, tol = 0.005) => Math.abs(a - b) <= tol;
+const eq = (a, b, what) => (a === b ? null : `${what}: got ${a}, expected ${b}`);
+
+/* --- Helpers to build fixtures ---------------------------------- */
+
+function shot(startLie, startDist, endLie, endDist, extra = {}) {
+  return M.newShot({
+    shotNum: 1, startLie, startDist,
+    endLie: extra.holed ? null : endLie,
+    endDist: extra.holed ? null : endDist,
+    holed: !!extra.holed, penalty: extra.penalty || 0, miss: extra.miss || null,
+  });
+}
+
+function roundOf(holes, mode = 'full') {
+  const r = M.newRound({
+    player: 'Test', courseId: 'c', courseName: 'Test GC', teeName: 'Blue',
+    layout: 'Front / Back', mode,
+    holes: holes.map((h, i) => ({ hole: i + 1, par: h.par, yards: h.yards })),
+  });
+  holes.forEach((h, i) => {
+    if (h.shots) { r.holes[i].shots = h.shots; M.relinkHole(r.holes[i]); }
+    if (h.score != null) { r.holes[i].score = h.score; r.holes[i].done = true; }
+  });
+  return r;
+}
+
+/* --- Baseline --------------------------------------------------- */
+
+suite('Baseline');
+
+check('interpolates between table points', () => {
+  const v = B.expectedStrokes('fairway', 130);
+  return v > 2.85 && v < 2.92 ? null : `got ${v}, expected between 2.85 and 2.92`;
+});
+
+check('clamps below and above the table', () => {
+  const low = B.expectedStrokes('tee', 1);
+  const high = B.expectedStrokes('tee', 9999);
+  return low === 2.40 && high === 5.28 ? null : `got ${low} / ${high}`;
+});
+
+check('green distances are read as feet', () => {
+  // 10ft should be far cheaper than 10 yards would be on any other lie.
+  const putt = B.expectedStrokes('green', 10);
+  return putt > 1.4 && putt < 1.55 ? null : `got ${putt}`;
+});
+
+check('par 3 tee shot classifies as approach', () => eq(
+  B.classifyShot({ shotNum: 1, par: 3, startLie: 'tee', startDist: 165, startUnit: 'y' }),
+  'app', 'category'));
+
+check('par 4 tee shot classifies as off the tee', () => eq(
+  B.classifyShot({ shotNum: 1, par: 4, startLie: 'tee', startDist: 400, startUnit: 'y' }),
+  'ott', 'category'));
+
+check('inside 30 yards is short game', () => eq(
+  B.classifyShot({ shotNum: 3, par: 5, startLie: 'rough', startDist: 20, startUnit: 'y' }),
+  'arg', 'category'));
+
+check('from the green is putting', () => eq(
+  B.classifyShot({ shotNum: 2, par: 3, startLie: 'green', startDist: 20, startUnit: 'ft' }),
+  'putt', 'category'));
+
+/* --- Strokes gained --------------------------------------------- */
+
+suite('Strokes gained');
+
+check('total is independent of the route taken', () => {
+  // Two shots to the green from the same tee, holing from different
+  // distances: the intermediate cancels, so the totals must match.
+  const a = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'green', 20), shot('green', 20, null, null, { holed: true }),
+  ] }]);
+  const b = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'green', 5), shot('green', 5, null, null, { holed: true }),
+  ] }]);
+  const ta = M.roundTotals(a).total;
+  const tb = M.roundTotals(b).total;
+  return near(ta, tb) ? null : `got ${ta.toFixed(3)} vs ${tb.toFixed(3)}`;
+});
+
+check('a penalty costs a stroke in score and in SG', () => {
+  const clean = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'fairway', 150), shot('fairway', 150, null, null, { holed: true }),
+  ] }]);
+  const penal = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'fairway', 150, { penalty: 1 }), shot('fairway', 150, null, null, { holed: true }),
+  ] }]);
+  const scoreGap = M.roundScore(penal) - M.roundScore(clean);
+  const sgGap = M.roundTotals(clean).total - M.roundTotals(penal).total;
+  if (scoreGap !== 1) return `score gap ${scoreGap}, expected 1`;
+  return near(sgGap, 1) ? null : `sg gap ${sgGap.toFixed(3)}, expected 1`;
+});
+
+check('categories sum to the total', () => {
+  const r = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'rough', 160), shot('rough', 160, 'green', 24),
+    shot('green', 24, 'green', 3), shot('green', 3, null, null, { holed: true }),
+  ] }]);
+  const t = M.roundTotals(r);
+  const sum = B.CATEGORIES.reduce((s, c) => s + t[c], 0);
+  return near(sum, t.total) ? null : `sum ${sum.toFixed(3)} vs total ${t.total.toFixed(3)}`;
+});
+
+/* --- Editing shots ---------------------------------------------- */
+
+suite('Editing');
+
+check('relink follows an edit through the rest of the hole', () => {
+  const r = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'fairway', 150), shot('fairway', 150, 'green', 20),
+    shot('green', 20, null, null, { holed: true }),
+  ] }]);
+  const hole = r.holes[0];
+  hole.shots[0].endDist = 120;      // corrected drive
+  M.relinkHole(hole);
+  return eq(hole.shots[1].startDist, 120, 'second shot start');
+});
+
+check('deleting a shot re-points the one after it', () => {
+  const r = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'fairway', 150), shot('fairway', 150, 'green', 20),
+    shot('green', 20, null, null, { holed: true }),
+  ] }]);
+  const hole = r.holes[0];
+  hole.shots.splice(1, 1);
+  M.relinkHole(hole);
+  if (hole.shots.length !== 2) return `${hole.shots.length} shots left`;
+  return eq(hole.shots[1].startLie, 'fairway', 'putt now starts from');
+});
+
+check('relink recomputes whether the hole is finished', () => {
+  const r = roundOf([{ par: 3, yards: 160, shots: [
+    shot('tee', 160, 'green', 15), shot('green', 15, null, null, { holed: true }),
+  ] }]);
+  const hole = r.holes[0];
+  hole.shots.pop();
+  M.relinkHole(hole);
+  return hole.done === false ? null : 'hole still marked done';
+});
+
+/* --- Sync round trip -------------------------------------------- */
+
+suite('Sync round trip');
+
+// The sheet returns everything as strings, and dates as Date objects.
+const asSheet = (obj) => {
+  const out = {};
+  Object.keys(obj).forEach((k) => {
+    const v = obj[k];
+    out[k] = (k === 'date' || k === 'finished_at') && v ? new Date(v)
+      : (v === '' ? '' : String(v));
+  });
+  return out;
+};
+
+const tripped = (round) => {
+  const flat = S.flattenRound(round);
+  return S.rebuildRound(asSheet(flat.summary), flat.shots.map(asSheet));
+};
+
+check('a full round survives the trip intact', () => {
+  const r = roundOf([
+    { par: 4, yards: 400, shots: [
+      shot('tee', 400, 'rough', 150, { miss: 'right' }),
+      shot('rough', 150, 'green', 22, { miss: 'short' }),
+      shot('green', 22, 'green', 3), shot('green', 3, null, null, { holed: true }) ] },
+    { par: 3, yards: 165, shots: [
+      shot('tee', 165, 'sand', 18, { penalty: 1 }),
+      shot('sand', 18, 'green', 9), shot('green', 9, null, null, { holed: true }) ] },
+  ]);
+  const back = tripped(r);
+  if (M.roundScore(back) !== M.roundScore(r)) return 'score changed';
+  if (M.roundPar(back) !== M.roundPar(r)) return 'par changed';
+  if (!near(M.roundTotals(back).total, M.roundTotals(r).total)) return 'strokes gained changed';
+  if (back.holes[0].shots[0].miss !== 'right') return 'miss direction lost';
+  if (back.holes[1].shots[0].penalty !== 1) return 'penalty lost';
+  if (back.holes[0].shots[2].startUnit !== 'ft') return 'feet/yards distinction lost';
+  return null;
+});
+
+check('a score-only round survives the trip intact', () => {
+  const r = roundOf([
+    { par: 5, yards: 484, score: 6 },
+    { par: 4, yards: 310, score: 4 },
+    { par: 3, yards: 165, score: 5 },
+  ], 'score');
+  const back = tripped(r);
+  if (back.mode !== 'score') return `mode came back as ${back.mode}`;
+  if (M.roundScore(back) !== 15) return `score ${M.roundScore(back)}, expected 15`;
+  if (M.roundPar(back) !== 12) return `par ${M.roundPar(back)}, expected 12`;
+  const scores = back.holes.map((h) => h.score).join(',');
+  return scores === '6,4,5' ? null : `hole scores ${scores}`;
+});
+
+check('a score-only round writes a row per hole', () => {
+  // This is the bug that sent a round to nowhere: no shots meant no
+  // rows, and the pull skips a round with no rows.
+  const r = roundOf([
+    { par: 4, yards: 400, score: 5 }, { par: 4, yards: 380, score: 4 },
+  ], 'score');
+  const flat = S.flattenRound(r);
+  if (flat.shots.length !== 2) return `${flat.shots.length} rows, expected 2`;
+  return eq(Number(flat.shots[0].shot_num), 0, 'shot_num for a score row');
+});
+
+check('score-only rounds are kept out of strokes gained', () => {
+  const scoreOnly = roundOf([{ par: 4, yards: 400, score: 5 }], 'score');
+  const full = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'green', 20), shot('green', 20, null, null, { holed: true }) ] }]);
+  const kept = M.sgRounds([scoreOnly, full]);
+  if (kept.length !== 1) return `${kept.length} rounds kept, expected 1`;
+  return M.isScoreOnly(kept[0]) ? 'kept the wrong one' : null;
+});
+
+/* --- Courses ---------------------------------------------------- */
+
+suite('Courses');
+
+check('one nine played twice builds an 18 hole round', () => {
+  const gardner = JSON.parse(JSON.stringify(SEED_COURSES.find((c) => c.id === 'seed_gardner')));
+  const full = C.playOptions(gardner).find((o) => o.holeCount === 18);
+  const holes = C.buildRoundHoles(gardner, full, 'Blue');
+  if (holes.length !== 18) return `${holes.length} holes`;
+  if (holes[9].sourceHole !== 1) return `hole 10 came from ${holes[9].sourceHole}`;
+  return eq(holes[9].yards, holes[0].yards, 'hole 10 yardage');
+});
+
+check('seeded cards total what the scorecards say', () => {
+  const gardner = SEED_COURSES.find((c) => c.id === 'seed_gardner');
+  const blue = C.nineYardage(gardner.nines[0], 'Blue');
+  const sa = SEED_COURSES.find((c) => c.id === 'seed_standrews');
+  const black = C.nineYardage(sa.nines[0], 'Black') + C.nineYardage(sa.nines[1], 'Black');
+  if (blue !== 3156) return `Gardner blue ${blue}, expected 3156`;
+  return black === 6362 ? null : `St Andrews black ${black}, expected 6362`;
+});
+
+check('every seeded course passes validation', () => {
+  const problems = [];
+  SEED_COURSES.forEach((course) => {
+    course.teeNames.forEach((tee) => problems.push(...C.validateCourse(course, tee)));
+  });
+  return problems.length ? problems[0] : null;
+});
+
+check('an identical card is spotted under a different name', () => {
+  const gardner = JSON.parse(JSON.stringify(SEED_COURSES.find((c) => c.id === 'seed_gardner')));
+  const copy = JSON.parse(JSON.stringify(gardner));
+  copy.id = 'other';
+  copy.name = 'Gardner GC';
+  const clash = C.findDuplicate(copy, [gardner]);
+  if (!clash) return 'no duplicate reported';
+  return eq(clash.kind, 'identical', 'clash kind');
+});
+
+/* --- Import ----------------------------------------------------- */
+
+suite('Import');
+
+check('survives markdown fences and chatter', () => {
+  const text = "Here you go:\n```json\n" + JSON.stringify({
+    name: 'Muni', tees: ['White'],
+    nines: [{ name: 'Main', pars: [4, 4, 3, 5, 4, 4, 3, 4, 5],
+      yards: { White: [300, 310, 150, 480, 350, 340, 140, 330, 470] } }],
+  }) + "\n```";
+  const course = I.parseCourseText(text);
+  return eq(course.nines[0].holes[3].yards.White, 480, 'hole 4 yardage');
+});
+
+check('a nine with no stated pairing gets played twice', () => {
+  const course = I.parseCourseText(JSON.stringify({
+    name: 'Muni', tees: ['White'],
+    nines: [{ name: 'Main', pars: [4, 4, 3, 5, 4, 4, 3, 4, 5],
+      yards: { White: [300, 310, 150, 480, 350, 340, 140, 330, 470] } }],
+  }));
+  if (course.combos.length !== 1) return `${course.combos.length} pairings`;
+  return eq(course.combos[0].nineIds[0], course.combos[0].nineIds[1], 'paired with itself');
+});
+
+check('a short par row is rejected with a readable reason', () => {
+  try {
+    I.parseCourseText(JSON.stringify({
+      name: 'X', tees: ['Blue'],
+      nines: [{ name: 'Front', pars: [4, 4, 3], yards: { Blue: [1, 2, 3, 4, 5, 6, 7, 8, 9] } }],
+    }));
+    return 'accepted a bad card';
+  } catch (err) {
+    return err.message.includes('9 numbers') ? null : `unhelpful message: ${err.message}`;
+  }
+});
+
+check('imported cards are not marked verified', () => {
+  const course = I.parseCourseText(JSON.stringify({
+    name: 'Muni', tees: ['White'],
+    nines: [{ name: 'Main', pars: [4, 4, 3, 5, 4, 4, 3, 4, 5],
+      yards: { White: [300, 310, 150, 480, 350, 340, 140, 330, 470] } }],
+  }));
+  return course.verified === false ? null : 'imported card claimed to be verified';
+});
+
+/* --- Records ---------------------------------------------------- */
+
+suite('Records and bests');
+
+check('a drive into trouble does not set the record', () => {
+  const r = roundOf([
+    { par: 4, yards: 420, shots: [
+      shot('tee', 420, 'recovery', 45, { penalty: 1 }),
+      shot('recovery', 45, null, null, { holed: true }) ] },
+    { par: 4, yards: 400, shots: [
+      shot('tee', 400, 'fairway', 145),
+      shot('fairway', 145, null, null, { holed: true }) ] },
+  ]);
+  const best = M.personalBests([r]);
+  if (!best.longestDrive) return 'no drive recorded at all';
+  return eq(best.longestDrive.yards, 255, 'longest drive');
+});
+
+check('a drive into the rough still counts', () => {
+  const r = roundOf([{ par: 4, yards: 430, shots: [
+    shot('tee', 430, 'rough', 155), shot('rough', 155, null, null, { holed: true }) ] }]);
+  const best = M.personalBests([r]);
+  return eq(best.longestDrive && best.longestDrive.yards, 275, 'longest drive');
+});
+
+check('the same ground played twice counts as one hole', () => {
+  const gardner = JSON.parse(JSON.stringify(SEED_COURSES.find((c) => c.id === 'seed_gardner')));
+  const full = C.playOptions(gardner).find((o) => o.holeCount === 18);
+  const r = M.newRound({
+    player: 'Test', courseId: gardner.id, courseName: gardner.name,
+    teeName: 'Blue', layout: 'Full 18', holes: C.buildRoundHoles(gardner, full, 'Blue'),
+  });
+  r.holes.forEach((hole) => {
+    hole.shots = [shot('tee', hole.yards, 'green', 20), shot('green', 20, null, null, { holed: true })];
+    M.relinkHole(hole);
+  });
+  const records = M.holeRecords([r]);
+  if (records.length !== 9) return `${records.length} distinct holes, expected 9`;
+  return records.every((x) => x.plays === 2) ? null : 'plays not counted twice';
+});
+
+/* --- Handicap model --------------------------------------------- */
+
+suite('Handicap model');
+
+check('the two real rounds land where they should', () => {
+  // A 77 came out at -6.6 and a 97 at -26.16 on the same course.
+  const low = H.handicapForTotal(-6.6);
+  const high = H.handicapForTotal(-26.16);
+  if (Math.round(low) !== 4) return `77 mapped to ${low.toFixed(1)}, expected about 4`;
+  return Math.round(high) === 27 ? null : `97 mapped to ${high.toFixed(1)}, expected about 27`;
+});
+
+check('scratch sits about three strokes behind tour', () => {
+  const v = H.expectedSG(0).total;
+  return near(v, -3.2, 0.05) ? null : `got ${v}`;
+});
+
+check('the weakest category is the one furthest behind', () => {
+  const profile = H.handicapProfile({ ott: -1.0, app: -3.6, arg: -0.9, putt: -1.1, total: -6.6 });
+  return eq(profile.weakest.category, 'app', 'weakest');
+});
+
+/* --- Render ----------------------------------------------------- */
+
+const byGroup = {};
+results.forEach((r) => {
+  if (!byGroup[r.group]) byGroup[r.group] = [];
+  byGroup[r.group].push(r);
+});
+
+const passed = results.filter((r) => r.ok).length;
+const failed = results.length - passed;
+
+document.getElementById('app').innerHTML = `
+  <div class="card">
+    <h2>${failed ? `${failed} failing` : 'All passing'}</h2>
+    <p class="muted">${passed} of ${results.length} checks passed.</p>
+  </div>
+  ${Object.keys(byGroup).map((name) => `
+    <div class="card">
+      <div class="group">${name}</div>
+      ${byGroup[name].map((r) => `
+        <div class="t ${r.ok ? 'pass' : 'fail'}">
+          <span class="mark">${r.ok ? '✓' : '✕'}</span>
+          <span>${r.name}${r.why ? `<br><span class="why">${r.why}</span>` : ''}</span>
+        </div>`).join('')}
+    </div>`).join('')}
+`;
+
+document.title = failed ? `${failed} failing — Ledger tests` : 'All passing — Ledger tests';
+</script>
+</body>
+</html>

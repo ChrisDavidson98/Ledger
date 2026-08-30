@@ -570,6 +570,75 @@ export function playerSummary(player, allRounds, baseline = 'tour') {
   };
 }
 
+/**
+ * The same physical hole aggregated across every round it appears in.
+ *
+ * Keyed on the SOURCE hole, not its position in the round: at Gardner
+ * the 4th and the 13th are the same piece of ground played twice, and
+ * counting them separately would halve the evidence for both.
+ */
+export function holeRecords(rounds, baseline = 'tour') {
+  const map = new Map();
+
+  sgRounds(rounds).forEach((round) => {
+    playedHoles(round).forEach((hole) => {
+      const nine = hole.sourceNine || '';
+      const number = hole.sourceHole || hole.hole;
+      const key = `${round.courseName}|${nine}|${number}`;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          courseName: round.courseName,
+          nine,
+          hole: number,
+          par: hole.par,
+          yards: hole.yards,
+          plays: 0,
+          sg: 0,
+          strokes: 0,
+          overPar: 0,
+          byCategory: CATEGORIES.reduce((acc, c) => { acc[c] = 0; return acc; }, {}),
+        });
+      }
+
+      const record = map.get(key);
+      const totals = holeTotals(hole, baseline);
+      const score = holeScore(hole);
+      record.plays += 1;
+      record.sg += totals.total;
+      record.strokes += score;
+      record.overPar += score - hole.par;
+      CATEGORIES.forEach((c) => { record.byCategory[c] += totals[c]; });
+    });
+  });
+
+  return [...map.values()].map((record) => ({
+    ...record,
+    avgSG: record.sg / record.plays,
+    avgScore: record.strokes / record.plays,
+    avgToPar: record.overPar / record.plays,
+    // Which part of the game this hole takes its toll on.
+    worstCategory: CATEGORIES.reduce(
+      (a, b) => (record.byCategory[a] <= record.byCategory[b] ? a : b)
+    ),
+  }));
+}
+
+/**
+ * The holes costing the most and least, given enough plays to mean
+ * something. One bad hole once is a bad hole once, not a nemesis.
+ */
+export function nemesisHoles(rounds, { minPlays = 2, count = 3, baseline = 'tour' } = {}) {
+  const records = holeRecords(rounds, baseline).filter((r) => r.plays >= minPlays);
+  const byCost = records.slice().sort((a, b) => a.avgSG - b.avgSG);
+  return {
+    worst: byCost.slice(0, count),
+    best: byCost.slice(-count).reverse(),
+    considered: records.length,
+  };
+}
+
 export function missTally(rounds, category, baseline = 'tour') {
   const tally = {};
   const sgByDir = {};

@@ -44,6 +44,8 @@ import {
   trendSeries,
   personalBests,
   playerSummary,
+  nemesisHoles,
+  holeRecords,
   missTally,
 } from './model.js';
 
@@ -1132,6 +1134,7 @@ function screenStats() {
 
     ${renderMissCard('Tee shot misses', teeMiss)}
     ${renderMissCard('Approach misses', appMiss)}
+    ${renderNemesisCard(rounds)}
     ${renderBestsCard(personalBests(rounds), allRounds)}
     ${renderComparison()}`;
 }
@@ -1388,6 +1391,43 @@ function renderHandicapCard(profile, { subtitle, caveat } = {}) {
         : ' Fairly even across the board.'}
     </p>
     <p class="tiny">${caveat || 'The handicap conversion is a model, not a measurement. It is anchored on scoring, which is solid; the split between categories is approximate. Good for spotting the weak spot, not for arguing over a decimal.'}</p>
+  </div>`;
+}
+
+/** Holes that keep costing, and holes that keep giving. */
+function renderNemesisCard(rounds) {
+  const { worst, best, considered } = nemesisHoles(rounds, { minPlays: 2, count: 3 });
+  if (!worst.length) {
+    return considered === 0 && rounds.length ? `<div class="card">
+      <h2>Hole by hole</h2>
+      <p class="muted">Play the same course twice and the holes that keep costing you will show up here.</p>
+    </div>` : '';
+  }
+
+  const row = (record, tone) => `
+    <div class="row">
+      <div class="badge" style="background:${tone === 'bad' ? 'var(--flag)' : 'var(--green-mid)'};color:#fff">
+        ${record.hole}
+      </div>
+      <div class="row-meta">
+        <div class="rname">${esc(record.courseName)}${record.nine ? ` <span class="tiny">${esc(record.nine)}</span>` : ''}</div>
+        <div class="rsub">par ${record.par} &middot; ${record.plays} plays &middot; averaging ${record.avgScore.toFixed(1)}${
+          tone === 'bad' ? ` &middot; mostly ${CATEGORY_LABELS[record.worstCategory].toLowerCase()}` : ''
+        }</div>
+      </div>
+      <div class="row-val ${sgClass(record.avgSG)}">${fmtSG(record.avgSG)}</div>
+    </div>`;
+
+  return `<div class="card">
+    <h2>Holes that cost you</h2>
+    <p class="muted">Strokes gained per play, for holes played at least twice. The same ground counts once however many times a round visits it.</p>
+    ${worst.map((r) => row(r, 'bad')).join('')}
+    ${best.length && best[0].avgSG > worst[0].avgSG ? `
+      <label>And holes you own</label>
+      ${best.map((r) => row(r, 'good')).join('')}` : ''}
+    <p class="tiny" style="margin-top:8px">${worst[0].avgSG < -0.4
+      ? `${esc(worst[0].courseName)} ${worst[0].hole} is the one worth a plan &mdash; ${fmtSG(worst[0].avgSG)} a play, mostly ${CATEGORY_LABELS[worst[0].worstCategory].toLowerCase()}.`
+      : 'No single hole is doing real damage, which is its own kind of good news.'}</p>
   </div>`;
 }
 
@@ -1672,7 +1712,58 @@ function screenClubhouse() {
       </div>
     </div>
 
-    ${renderClubhouseNotes(summaries)}`;
+    ${renderClubhouseNotes(summaries)}
+    ${renderSharedHoles(all, players)}`;
+}
+
+/**
+ * The hole that beats each player, and any hole that beats everyone.
+ *
+ * A hole nobody handles is a different thing from a hole one person
+ * struggles with, and the second is the one worth ribbing somebody
+ * about.
+ */
+function renderSharedHoles(allRounds, players) {
+  const perPlayer = players.map((player) => {
+    const theirs = allRounds.filter((r) => r.player === player);
+    const { worst } = nemesisHoles(theirs, { minPlays: 2, count: 1 });
+    return { player, hole: worst[0] || null };
+  }).filter((row) => row.hole);
+
+  // Holes at least two people have played more than once.
+  const shared = holeRecords(allRounds)
+    .filter((r) => r.plays >= 3)
+    .sort((a, b) => a.avgSG - b.avgSG)
+    .slice(0, 3);
+
+  if (!perPlayer.length && !shared.length) return '';
+
+  return `<div class="card">
+    <h2>Holes with a grudge</h2>
+    ${perPlayer.length ? `
+      <p class="muted">Each player's worst hole, from those they have played at least twice.</p>
+      ${perPlayer.map(({ player, hole }) => `
+        <div class="row">
+          <div class="badge" style="background:var(--flag);color:#fff">${hole.hole}</div>
+          <div class="row-meta">
+            <div class="rname">${esc(player)} &mdash; ${esc(hole.courseName)}${hole.nine ? ` <span class="tiny">${esc(hole.nine)}</span>` : ''}</div>
+            <div class="rsub">par ${hole.par} &middot; averaging ${hole.avgScore.toFixed(1)} over ${hole.plays} plays &middot; mostly ${CATEGORY_LABELS[hole.worstCategory].toLowerCase()}</div>
+          </div>
+          <div class="row-val ${sgClass(hole.avgSG)}">${fmtSG(hole.avgSG)}</div>
+        </div>`).join('')}` : ''}
+
+    ${shared.length ? `
+      <label>Hardest between everyone</label>
+      ${shared.map((r) => `
+        <div class="row">
+          <div class="badge">${r.hole}</div>
+          <div class="row-meta">
+            <div class="rname">${esc(r.courseName)}${r.nine ? ` <span class="tiny">${esc(r.nine)}</span>` : ''}</div>
+            <div class="rsub">par ${r.par} &middot; ${r.plays} plays across the group</div>
+          </div>
+          <div class="row-val ${sgClass(r.avgSG)}">${fmtSG(r.avgSG)}</div>
+        </div>`).join('')}` : ''}
+  </div>`;
 }
 
 /** A plain-language read of who is doing what well. */
