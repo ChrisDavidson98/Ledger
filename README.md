@@ -31,8 +31,10 @@ only reads, so it cannot touch stored rounds or the sheet.
 
 Run it before pushing. It covers the strokes-gained maths, shot editing and
 relinking, the sync round trip for both round modes, course building, duplicate
-detection, import parsing, the records rules, club distances and gapping, and
-the handicap model against the two real rounds it was calibrated on.
+detection, import parsing, the records rules, club distances and gapping, the
+handicap model against the two real rounds it was calibrated on, and the export
+briefing — that the conventions are stated, that the numbers in the prose match
+the ones the model computes, and that the CSV shows its own working.
 
 ## How it is put together
 
@@ -45,6 +47,7 @@ the handicap model against the two real rounds it was calibrated on.
 | `src/seed.js` | Scorecards transcribed from the paper cards |
 | `src/import.js` | Bringing a scorecard in from pasted text |
 | `src/handicap.js` | Turning strokes gained into a handicap level |
+| `src/brief.js` | Writing a round out as a briefing or a shots CSV |
 | `src/sync.js` | Google Sheet sync — push, pull, delete, archive, setup links |
 | `src/app.js` | Screens, state, event wiring |
 | `sw.js` | Offline app shell |
@@ -121,6 +124,38 @@ published hole-by-hole yardages turned out wrong on all nine holes, and an app
 that quietly starts a round on bad numbers is worse than one that asks for a
 card. The photo route gets the same convenience with the numbers on screen
 first, and needs no API key, proxy or rate limiting.
+
+## Talking a round over
+
+The app answers "how bad was it and where". It cannot answer "why did 14 fall
+apart" or "what am I playing to without the two blow-ups", because that is a
+conversation and not a screen. So a round exports as something you can hand to
+a chat.
+
+**Round detail → Talk this round over** writes the whole round as Markdown:
+every shot with what it cost, the holes that did the damage, the round against
+the same player's usual, and a table of what the pace looks like with the worst
+one, two and three holes removed. **Stats → Talk your game over** does the same
+for everything logged. Both offer **Copy for Chat** and **Save as File** — copy
+is the shorter path on a phone, where saving to Files and finding it again is
+three screens of detour; the file is the one to drag into a chat on a desktop.
+
+There is also a shots CSV, one row per shot, for a spreadsheet or for anything
+that would rather count than read. It carries expected strokes before and after
+alongside the strokes-gained figure, so `sg = before - after - strokes` can be
+checked rather than taken on faith.
+
+The most important part of both briefings is the preamble. A model handed a
+table of numbers with no conventions guesses at them, and the guesses are wrong
+in specific ways: that green distances are yards, that a par-3 tee shot is a
+drive, that a negative number is an error. Stating the rules costs a paragraph
+and removes a whole class of confident nonsense. A closing section says what the
+data cannot see — no wind, no lie quality, no pin position, and a dogleg that
+reads long — so the conversation stays on what was actually recorded.
+
+**An export is a read view, not a save.** It is built from raw shots on demand
+and thrown away, like every other derived number here. Improve the baseline
+tables and the next export improves with them.
 
 ## Signing in and sharing
 

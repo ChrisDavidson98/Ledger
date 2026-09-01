@@ -53,6 +53,14 @@ import {
   missTally,
 } from './model.js';
 
+import {
+  roundBrief,
+  careerBrief,
+  shotsCsv,
+  roundFilename,
+  careerFilename,
+} from './brief.js';
+
 import * as store from './storage.js';
 import * as sync from './sync.js';
 import { missingSeeds, cloneSeed } from './seed.js';
@@ -110,6 +118,10 @@ const STATE = {
   editShotIdx: null,
   syncBusy: false,
   syncStatus: null,
+  // Export confirmations render next to the button pressed rather
+  // than at the top of the screen — the detail and stats screens have
+  // no notice slot, and a message six cards away is easy to miss.
+  exportStatus: null,
   notice: null,
   error: null,
 };
@@ -675,6 +687,7 @@ function screenSummary() {
   if (!round) return screenHome();
   return `${topbar('Round Complete')}
     ${roundReport(round)}
+    ${exportCard(round)}
     <button class="btn-primary" data-action="goto-history">Done</button>`;
 }
 
@@ -1036,6 +1049,7 @@ function screenDetail() {
   if (!round) return screenHistory();
   return `${topbar('Round Detail')}
     ${roundReport(round)}
+    ${exportCard(round)}
     <div class="btn-row">
       <button class="btn-ghost" data-action="goto-history">&larr; Back</button>
       <button class="btn-danger" data-action="delete-round" data-id="${esc(round.id)}">Delete</button>
@@ -1161,7 +1175,21 @@ function screenStats() {
     ${(() => { const cd = clubDistances(rounds); return renderClubCard(cd) + renderGappingCard(cd); })()}
     ${renderNemesisCard(rounds)}
     ${renderBestsCard(personalBests(rounds), allRounds)}
-    ${renderComparison()}`;
+    ${renderComparison()}
+
+    <div class="card">
+      <h2>Talk your game over</h2>
+      <p class="muted">Everything on this screen as one file: where the game stands, approach and putting by distance, miss patterns, club distances, the holes with a grudge, and every round you have logged. Hand it to a chat and ask what to go and practise.</p>
+      <div class="btn-row">
+        <button class="btn-primary" data-action="copy-career-brief">Copy for Chat</button>
+        <button class="btn-ghost" data-action="export-career-brief">Save as File</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="export-career-csv">Save Every Shot as CSV</button>
+      </div>
+      <p class="tiny" style="margin-top:8px">A single round exports in more detail from its own page &mdash; shot by shot, with the holes that cost the most.</p>
+      ${exportStatus()}
+    </div>`;
 }
 
 /**
@@ -2270,6 +2298,7 @@ function playerRounds() {
 function go(screen, extra = {}) {
   STATE.error = null;
   STATE.notice = null;
+  STATE.exportStatus = null;
   Object.assign(STATE, extra, { screen });
   render();
 }
@@ -2459,18 +2488,119 @@ function saveCourseDraft() {
   sync.syncInBackground(null, { force: true });
 }
 
-function exportData() {
-  const blob = new Blob([JSON.stringify(store.exportAll(), null, 2)], {
-    type: 'application/json',
-  });
+/** Hands the browser a file it did not fetch from anywhere. */
+function download(text, filename, type) {
+  const blob = new Blob([text], { type: `${type};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `ledger-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function exportData() {
+  download(
+    JSON.stringify(store.exportAll(), null, 2),
+    `ledger-backup-${new Date().toISOString().slice(0, 10)}.json`,
+    'application/json',
+  );
+}
+
+/**
+ * Builds an export and either saves it or puts it on the clipboard.
+ *
+ * Both routes exist because the two devices want different things.
+ * On a desktop a file is the point — it gets dragged into a chat. On
+ * a phone, saving to Files and then finding it again is three screens
+ * of detour when the destination is a text box one app away, so Copy
+ * is the faster path and is offered first.
+ */
+function runExport(build, { copy = false } = {}) {
+  const done = (text, bad = false) => { STATE.exportStatus = { text, bad }; render(); };
+  try {
+    const { text, filename, type } = build();
+    if (!copy) {
+      download(text, filename, type);
+      return done(`Saved ${filename}.`);
+    }
+    navigator.clipboard.writeText(text).then(
+      () => done('Copied. Paste it into a chat and start asking questions.'),
+      () => {
+        // Clipboard access is refused in plenty of contexts, and a
+        // failure there is no reason to lose the export.
+        download(text, filename, type);
+        done(`Could not copy, so it was saved as ${filename} instead.`);
+      },
+    );
+  } catch (err) {
+    done(err.message, true);
+  }
+}
+
+/** The result of the last export, shown beside the buttons. */
+function exportStatus() {
+  if (!STATE.exportStatus) return '';
+  const { text, bad } = STATE.exportStatus;
+  return `<div class="${bad ? 'err-box' : 'ok-box'}" style="margin-top:10px">${esc(text)}</div>`;
+}
+
+/**
+ * The round being exported, whether it is the one on screen or one
+ * being reopened from history.
+ */
+function roundById(id) {
+  const round = (STATE.round && STATE.round.id === id) ? STATE.round : store.getRound(id);
+  if (!round) throw new Error('That round is no longer on this device.');
+  return round;
+}
+
+function exportOneRound(id, options = {}) {
+  runExport(() => {
+    const round = roundById(id);
+    return {
+      text: roundBrief(round, { history: store.getRounds().filter((r) => r.player === round.player) }),
+      filename: roundFilename(round, 'md'),
+      type: 'text/markdown',
+    };
+  }, options);
+}
+
+function exportCareer(options = {}) {
+  runExport(() => ({
+    text: careerBrief(STATE.player, playerRounds()),
+    filename: careerFilename(STATE.player, 'md'),
+    type: 'text/markdown',
+  }), options);
+}
+
+/**
+ * The card that gets a round out of the app and into a conversation.
+ *
+ * The app can say approach play cost four shots. It cannot answer
+ * "why did 14 fall apart" or "what am I playing to without the two
+ * blow-ups", because that is a conversation. This packs the round up
+ * with its conventions written down so the conversation starts from
+ * the real numbers instead of guesses.
+ */
+function exportCard(round) {
+  const scoreOnly = isScoreOnly(round);
+  return `<div class="card">
+    <h2>Talk this round over</h2>
+    <p class="muted">Writes the whole round out as a briefing &mdash; every shot, what each one cost, the holes that did the damage, and what the round looks like without them. Hand it to any chat and ask it questions.</p>
+    <div class="btn-row">
+      <button class="btn-primary" data-action="copy-round-brief" data-id="${esc(round.id)}">Copy for Chat</button>
+      <button class="btn-ghost" data-action="export-round-brief" data-id="${esc(round.id)}">Save as File</button>
+    </div>
+    ${scoreOnly ? `<p class="tiny" style="margin-top:8px">This round is score only, so the briefing carries the card and nothing else. There are no shots to break down.</p>`
+      : `<div class="btn-row">
+      <button class="btn-ghost" data-action="export-round-csv" data-id="${esc(round.id)}">Save Shots as CSV</button>
+    </div>
+    <p class="tiny" style="margin-top:8px">The briefing is written to be read. The CSV is one row per shot for a spreadsheet, or for anything that would rather count than read.</p>`}
+    ${exportStatus()}
+  </div>`;
 }
 
 /**
@@ -2702,6 +2832,36 @@ const ACTIONS = {
     go('history');
   },
   'goto-import': () => go('courseImport', { importText: '', importPreview: null, importForce: false }),
+
+  /*
+   * Exports. The briefing is built against the player's other rounds
+   * so it can say whether this was a bad round or a bad round *for
+   * them*, which is the more useful sentence and the one the app on
+   * its own never gets to make.
+   */
+  'copy-round-brief': (el) => exportOneRound(el.getAttribute('data-id'), { copy: true }),
+  'export-round-brief': (el) => exportOneRound(el.getAttribute('data-id')),
+
+  'export-round-csv': (el) => {
+    const round = roundById(el.getAttribute('data-id'));
+    runExport(() => ({
+      text: shotsCsv([round]),
+      filename: roundFilename(round, 'csv'),
+      type: 'text/csv',
+    }));
+  },
+
+  'copy-career-brief': () => exportCareer({ copy: true }),
+  'export-career-brief': () => exportCareer(),
+
+  'export-career-csv': () => {
+    const player = STATE.player;
+    runExport(() => ({
+      text: shotsCsv(playerRounds()),
+      filename: careerFilename(player, 'csv'),
+      type: 'text/csv',
+    }));
+  },
 
   'copy-prompt': async () => {
     try {

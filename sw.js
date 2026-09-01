@@ -7,18 +7,32 @@
    code so the page opens with no signal at all.
 --------------------------------------------------------------- */
 
-const CACHE = 'ledger-v1';
+/* Bumped whenever SHELL changes, so activate clears the old copy. */
+const CACHE = 'ledger-v2';
 
+/*
+ * Every module app.js imports, because they are static imports: one
+ * of them missing from the cache is not a degraded feature, it is a
+ * blank screen on the 7th tee. The list had fallen behind the code —
+ * four modules were only ever cached by having been fetched once,
+ * which a phone opened offline for the first time never has.
+ */
 const SHELL = [
   './',
   './index.html',
   './styles.css',
   './manifest.json',
+  './icon.svg',
   './src/app.js',
   './src/model.js',
   './src/baseline.js',
   './src/storage.js',
   './src/courses.js',
+  './src/handicap.js',
+  './src/import.js',
+  './src/seed.js',
+  './src/sync.js',
+  './src/brief.js',
 ];
 
 self.addEventListener('install', (event) => {
