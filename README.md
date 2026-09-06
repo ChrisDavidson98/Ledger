@@ -236,6 +236,11 @@ the home screen *first*, then sign in.
 Manage deployments → pencil → New version**, which keeps the same URL. Creating
 a *new deployment* issues a different URL and strands every other phone.
 
+Bump `BUILD` in `src/app.js` on any deploy that somebody else needs to be able to
+tell apart from the one before — it shows at the bottom of the sign-in screen
+and in Settings, which turns "are you on the new version" into a text message
+rather than an evening.
+
 Bump `CONTRACT` when the actions or columns change, and `CLIENT_CONTRACT` in
 `src/sync.js` alongside it. Column changes are safe: `migrateHeaders` re-maps
 existing rows by header name, so columns can be added or reordered without

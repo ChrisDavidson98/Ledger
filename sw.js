@@ -8,7 +8,7 @@
 --------------------------------------------------------------- */
 
 /* Bumped whenever SHELL changes, so activate clears the old copy. */
-const CACHE = 'ledger-v4';
+const CACHE = 'ledger-v5';
 
 /*
  * Every module app.js imports, because they are static imports: one
@@ -41,7 +41,7 @@ const SHELL = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE)
-      .then((cache) => cache.addAll(SHELL))
+      .then((cache) => cache.addAll(SHELL.map((u) => new Request(u, { cache: 'no-cache' }))))
       .then(() => self.skipWaiting())
   );
 });
@@ -56,6 +56,32 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+/**
+ * Fetch that actually reaches the network for our own files.
+ *
+ * A plain fetch() consults the BROWSER's HTTP cache first, and GitHub
+ * Pages serves assets with a max-age. So "network-first" below was
+ * quietly network-second: for several minutes after a deploy it got
+ * the old file out of the HTTP cache, believed it had been to the
+ * network, and wrote that stale copy into the service worker cache as
+ * though it were current. A phone could sit two versions behind while
+ * every layer thought it was up to date, which cost most of an evening
+ * working out why a fix was not reaching somebody.
+ *
+ * `no-cache` revalidates instead of trusting the age: a 304 when
+ * nothing changed, which is nearly free, and the real bytes when it
+ * did. Only for our own origin — nothing else here is ours to reason
+ * about.
+ */
+function freshFetch(request) {
+  if (!request.url.startsWith(self.location.origin)) return fetch(request);
+  try {
+    return fetch(request, { cache: 'no-cache' });
+  } catch (err) {
+    return fetch(request);
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -63,7 +89,7 @@ self.addEventListener('fetch', (event) => {
   // Network-first so a deploy is picked up promptly, falling back to
   // cache the moment the network is unavailable or slow to fail.
   event.respondWith(
-    fetch(request)
+    freshFetch(request)
       .then((response) => {
         if (response && response.ok && request.url.startsWith(self.location.origin)) {
           const copy = response.clone();

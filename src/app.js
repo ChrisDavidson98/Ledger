@@ -170,6 +170,17 @@ const STATE = {
   error: null,
 };
 
+/**
+ * A visible build marker.
+ *
+ * Bump it whenever a deploy needs to be told apart from the one before
+ * it on somebody else's phone. "Is he on the new version" turned into
+ * an hour of guesswork twice, once because a fix genuinely had not
+ * arrived and once because it had; a four-character string at the
+ * bottom of the sign-in screen answers it in a text message.
+ */
+const BUILD = '2026-09-05e';
+
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
 
@@ -351,6 +362,10 @@ function screenLogin() {
         <button class="btn-ghost" style="margin-top:10px" data-action="connect-device">Connect</button>
         <p class="tiny">The link carries the sheet address only, never the passphrase &mdash; you will be asked for that next.</p>
       </div>` : ''}
+
+    <p class="tiny" style="text-align:center">Build ${BUILD}${
+      isStandalone() ? ' · home screen' : ' · browser tab'
+    }</p>
 
     ${isStandalone() === false ? `
       <div class="card">
@@ -1032,6 +1047,7 @@ function screenSettings() {
       </div>
       <p class="tiny">Clean Up Sheet removes duplicated rows and any round still sitting in the live tabs after being deleted. Safe to run any time; it reports what it found.</p>
       <p class="tiny">Scorecard Repair is for after a course has been corrected: a round keeps the yardages it was played against, so fixing the card does not reach back into rounds already logged. It shows the difference before writing anything.</p>
+      <p class="tiny">This app is build <strong>${esc(BUILD)}</strong>, running from the <strong>${isStandalone() ? 'home screen' : 'browser tab'}</strong>. On a phone those two keep separate data, so a name signed in on one is not signed in on the other.</p>
       <p class="tiny">Check Which Version asks the URL what it is serving, without needing the passphrase. Use it when two phones disagree &mdash; if they report different contract numbers, one is pointed at an older deployment.</p>
       ${STATE.syncStatus ? `<div class="${STATE.syncStatus.bad ? 'err-box' : 'ok-box'}">${esc(STATE.syncStatus.text)}</div>` : ''}
     </div>
