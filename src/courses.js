@@ -334,3 +334,105 @@ export function addNine(course, name) {
   }
   return nine;
 }
+
+/* --- Sanity warnings ---------------------------------------------
+   validateNine above decides whether a card can be SAVED. This is a
+   softer pass that decides whether it looks believable, and it warns
+   without ever blocking — real courses have a 93 yard par 3 and a 215
+   yard par 4, and an editor that refused them would be wrong more
+   often than the person typing.
+
+   It exists because a par 4 was entered at 530 yards and a par 5 at
+   306, the two having been transposed. Nothing objected, three people
+   played the round against it, and the mistake only surfaced later in
+   the strokes gained. A line reading "hole 8: 530y is unusual for a
+   par 4" at the moment of typing would have cost nothing.
+
+   TWO THINGS WERE TRIED AND DROPPED, both because they fired on cards
+   known to be correct. Tight length bands flagged Gardner's forward
+   tees, where a 93 yard par 3 and a 396 yard par 5 are both real. And
+   duplicate yardages — proposed for catching a half-edited copy —
+   turned out to be ordinary: St Andrews has two holes at 343 yards in
+   the same nine off the same tee. Worse, a duplicate check cannot see
+   a transposition at all, since swapping two numbers leaves the same
+   set of numbers. A warning that cries wolf on a correct card is worse
+   than no warning, because by the time it matters nobody reads it.
+------------------------------------------------------------------ */
+
+/* Deliberately loose. These are the bounds outside which a number is
+   more likely to be a typo than a golf hole, not the bounds of what a
+   golf hole can be — every one of them was widened after a seeded
+   card, transcribed from paper, walked into it. */
+const PLAUSIBLE = {
+  3: { min: 70, max: 280 },
+  4: { min: 200, max: 520 },
+  5: { min: 290, max: 700 },
+  6: { min: 500, max: 800 },
+};
+
+const ABSURD = { min: 60, max: 750 };
+
+/*
+ * How far a shorter-par hole has to out-measure a longer-par one
+ * before it is worth mentioning.
+ *
+ * A small overlap is ordinary — Sykes off the Red tees has a 314 yard
+ * par 4 and a 303 yard par 5, and both are correct. A swap is not
+ * small: the transposition that prompted all this left a 530 yard par
+ * 4 against a 306 yard par 5, an overlap of 224. Requiring a real gap
+ * keeps the check silent on short forward tees, where par 4s and par
+ * 5s genuinely run into each other.
+ */
+const SWAP_MARGIN = 50;
+
+/**
+ * Everything questionable about one tee's yardages, as sentences.
+ *
+ * The strongest signal here is the last one, and it is the one that
+ * would actually have caught this: a par 4 longer than a par 5 on the
+ * same card. Absolute bands have to stay loose enough for forward
+ * tees, which blunts them; the comparison between pars does not,
+ * because whatever the tee, the par 5s are the long holes. That is
+ * exactly the shape a transposition leaves behind.
+ */
+export function yardageWarnings(course, teeName) {
+  const warnings = [];
+  const byPar = { 3: [], 4: [], 5: [], 6: [] };
+
+  (course.nines || []).forEach((nine) => {
+    (nine.holes || []).forEach((hole) => {
+      const yards = Number(hole.yards ? hole.yards[teeName] : NaN);
+      if (!Number.isFinite(yards) || yards <= 0) return;
+      const par = Number(hole.par);
+      const where = `${nine.name} hole ${hole.hole}`;
+      if (byPar[par]) byPar[par].push({ where, yards });
+
+      if (yards < ABSURD.min || yards > ABSURD.max) {
+        warnings.push(`${where}: ${yards}y is not a length a golf hole comes in — check it.`);
+        return;
+      }
+
+      const band = PLAUSIBLE[par];
+      if (band && (yards < band.min || yards > band.max)) {
+        warnings.push(`${where}: ${yards}y is unusual for a par ${par} — check this.`);
+      }
+    });
+  });
+
+  // A par 4 longer than a par 5 off the same tee. Rare enough on a
+  // real card to be worth saying every time, and the precise shape
+  // left behind when two holes get swapped.
+  [[4, 5], [3, 4]].forEach(([shorter, longer]) => {
+    if (!byPar[shorter].length || !byPar[longer].length) return;
+    const longest = byPar[shorter].reduce((a, b) => (a.yards > b.yards ? a : b));
+    const shortest = byPar[longer].reduce((a, b) => (a.yards < b.yards ? a : b));
+    if (longest.yards > shortest.yards + SWAP_MARGIN) {
+      warnings.push(
+        `${longest.where} is a ${longest.yards}y par ${shorter}, longer than `
+        + `${shortest.where} at ${shortest.yards}y for a par ${longer} — check whether these two are the right way round.`
+      );
+    }
+  });
+
+  return warnings;
+}

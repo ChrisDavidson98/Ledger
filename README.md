@@ -37,7 +37,9 @@ covers the export briefing — that the conventions are stated, that the numbers
 in the prose match the ones the model computes, and that the CSV shows its own
 working — and the benchmark family's calibration and monotonicity, the
 implied-handicap solve and its thin-sample guards, tee times and their sheet
-round trip, the calendar grid, and the `.ics` export down to line folding.
+round trip, the calendar grid, the `.ics` export down to line folding, the
+roster's matching rules, and the scorecard repair — including that it is
+idempotent, and that the course warnings stay silent on every seeded card.
 
 ## How it is put together
 
@@ -52,6 +54,7 @@ round trip, the calendar grid, and the `.ics` export down to line folding.
 | `src/handicap.js` | Turning strokes gained into a handicap level |
 | `src/schedule.js` | Tee times, the calendar grid, and calendar export |
 | `src/charts.js` | Inline SVG chart primitives |
+| `src/repair.js` | Bringing rounds back in step with a corrected scorecard |
 | `src/brief.js` | Writing a round out as a briefing or a shots CSV |
 | `src/sync.js` | Google Sheet sync — push, pull, delete, archive, setup links |
 | `src/app.js` | Screens, state, event wiring |
@@ -96,6 +99,17 @@ tour table is measured data, and the rest are derived from it. The setting lives
 on the device, not on the round, so two people can look at the same card against
 different standards. Nothing recomputed is written back.
 
+**A round keeps its own copy of the card it was played against.** Hole yardages
+are snapshotted into the round when it starts, which is normally right — it is
+the record of what the card said that day. The consequence, which is not
+obvious: correcting a course does **not** reach back into rounds already played
+on it. `relinkHole` derives the first shot's starting distance from the hole
+yardage, so a wrong number is wrong for the tee shot and nothing else; every
+later shot started where the previous one finished, and those were typed in.
+**Settings → Scorecard Repair** is how a round catches up, and it corrects
+yardages only — strokes gained then comes out right on its own, because it was
+never stored in the first place.
+
 ### Conventions worth knowing
 
 - Distances are in **yards for every lie except the green**, which is in feet.
@@ -132,7 +146,9 @@ starts it with the course already chosen.
 
 **Clubhouse** — everyone side by side, and the holes with a grudge.
 
-**Courses** — scorecards, by photo import or by hand.
+**Courses** — scorecards, by photo import or by hand. The editor warns on
+yardages that look wrong for their par, and on a par 4 measuring longer than a
+par 5, which is the shape a transposition leaves. It never blocks a save.
 
 ## Adding a course
 

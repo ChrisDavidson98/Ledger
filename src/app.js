@@ -95,6 +95,7 @@ import * as store from './storage.js';
 import * as sync from './sync.js';
 import { missingSeeds, cloneSeed } from './seed.js';
 import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js';
+import { planRepair, describePlan } from './repair.js';
 import {
   handicapProfile, fmtHandicap, fmtHandicapShort, upsideFor,
   handicapForTotal, handicapForCategory,
@@ -121,6 +122,7 @@ import {
   removeTee,
   addNine,
   newCombo,
+  yardageWarnings,
 } from './courses.js';
 
 const STATE = {
@@ -152,6 +154,8 @@ const STATE = {
   teeTimeDraft: null,    // tee time being created or edited
   viewTeeTimeId: null,
   missMode: 'count',     // miss grid shaded by frequency, or by cost
+  repairPlan: null,      // previewed scorecard repair, before anything is written
+  repairCourseId: null,
   archive: null,
   editShotIdx: null,
   syncBusy: false,
@@ -276,7 +280,7 @@ const NAV = [
 const NAV_GROUPS = {
   home: ['home', 'setup', 'play', 'scorecard', 'summary'],
   calendar: ['calendar', 'teeTime', 'teeTimeEdit'],
-  history: ['history', 'detail', 'settings'],
+  history: ['history', 'detail', 'settings', 'repair'],
   stats: ['stats'],
   clubhouse: ['clubhouse'],
   courses: ['courses', 'courseEdit', 'courseImport'],
@@ -997,7 +1001,11 @@ function screenSettings() {
         <button class="btn-ghost" data-action="probe-backend" ${sync.hasUrl() && !STATE.syncBusy ? '' : 'disabled'}>Check Which Version</button>
         <button class="btn-ghost" data-action="cleanup-sheet" ${sync.isConfigured() && !STATE.syncBusy ? '' : 'disabled'}>Clean Up Sheet</button>
       </div>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="goto-repair">Scorecard Repair</button>
+      </div>
       <p class="tiny">Clean Up Sheet removes duplicated rows and any round still sitting in the live tabs after being deleted. Safe to run any time; it reports what it found.</p>
+      <p class="tiny">Scorecard Repair is for after a course has been corrected: a round keeps the yardages it was played against, so fixing the card does not reach back into rounds already logged. It shows the difference before writing anything.</p>
       <p class="tiny">Check Which Version asks the URL what it is serving, without needing the passphrase. Use it when two phones disagree &mdash; if they report different contract numbers, one is pointed at an older deployment.</p>
       ${STATE.syncStatus ? `<div class="${STATE.syncStatus.bad ? 'err-box' : 'ok-box'}">${esc(STATE.syncStatus.text)}</div>` : ''}
     </div>
@@ -1174,6 +1182,109 @@ function renderRosterCard() {
     }&middot; ${origin.count} name${origin.count === 1 ? '' : 's'}.</p>` : ''}
     <p class="tiny">Turning somebody off blocks them at the gate and leaves every round they logged exactly where it is. This is identity, not a lock &mdash; what keeps strangers out of the data is the sheet secret above.</p>
   </div>`;
+}
+
+/**
+ * Put rounds back in step with a scorecard that has since been fixed.
+ *
+ * A round keeps its own copy of the yardages from the day it was
+ * played, which is normally right — it is the record of what the card
+ * said. When the card was wrong, correcting the course does nothing
+ * for rounds already on it, and this is how they catch up.
+ *
+ * Nothing is written until the diff has been looked at. That is the
+ * whole design: the tool's job is to be trusted, and a repair that
+ * applies itself before anybody has seen what it would do is not.
+ */
+function screenRepair() {
+  const plan = STATE.repairPlan;
+  const courses = listCourses();
+  const rounds = store.getRounds();
+
+  const scoped = STATE.repairCourseId
+    ? rounds.filter((r) => r.courseId === STATE.repairCourseId)
+    : rounds;
+
+  return `${topbar('Scorecard Repair')}
+    ${notices()}
+
+    <div class="card">
+      <h2>Rounds against a corrected card</h2>
+      <p class="muted">A round stores the yardages it was played against. Fixing a course does not reach back into rounds already logged &mdash; this compares them and offers to bring them into line.</p>
+      <p class="tiny">Strokes gained is not stored anywhere and is never written by this. It is recomputed from the shots every time it is shown, so correcting a yardage is enough on its own.</p>
+
+      <label>Course</label>
+      <div class="chip-grid g2">
+        <button class="chip ${STATE.repairCourseId ? '' : 'active'}" data-repair-course="">Every course</button>
+        ${courses.map((c) => `
+          <button class="chip ${STATE.repairCourseId === c.id ? 'active' : ''}"
+                  data-repair-course="${esc(c.id)}" style="font-size:12px">${esc(c.name)}</button>
+        `).join('')}
+      </div>
+      <p class="tiny">${scoped.length} round${scoped.length === 1 ? '' : 's'} on this device in scope, everybody's included &mdash; whoever runs this repairs the group, and the rest pick it up on their next sync.</p>
+
+      <button class="btn-primary" data-action="repair-preview">Check These Rounds</button>
+    </div>
+
+    ${plan ? `
+      <div class="card">
+        <div class="split">
+          <h2>${plan.changed.length ? `${plan.changed.length} to correct` : 'Nothing to correct'}</h2>
+          <span class="tiny">${plan.unchanged.length} already right${plan.blocked.length ? ` · ${plan.blocked.length} unreadable` : ''}</span>
+        </div>
+
+        ${plan.changed.length ? `
+          ${plan.changed.map((p) => `
+            <div class="row" style="display:block">
+              <div class="rname">${esc(p.player)} &middot; ${fmtDate(p.date)}</div>
+              <div class="rsub">${esc(p.courseName)} &middot; ${esc(p.teeName)}${p.layout ? ` &middot; ${esc(p.layout)}` : ''}</div>
+              <div class="card-editor" style="margin-top:8px">
+                ${p.holes.map((h) => `
+                  <div class="line" style="grid-template-columns:56px 1fr">
+                    <span class="tiny">Hole ${h.hole}</span>
+                    <span class="mono tiny">${h.from}y &rarr; <strong>${h.to}y</strong>
+                      &middot; SG ${fmtSG(h.sgBefore)} &rarr; ${fmtSG(h.sgAfter)}
+                      <span class="${sgClass(h.sgAfter - h.sgBefore)}">(${fmtSG(h.sgAfter - h.sgBefore)})</span></span>
+                  </div>`).join('')}
+                ${(() => {
+                  const moved = ['total', ...CATEGORIES]
+                    .filter((k) => Math.abs(p.after[k] - p.before[k]) >= 0.005);
+                  if (!moved.length) {
+                    // Two holes swapped move by equal and opposite
+                    // amounts, so the round total does not budge. Saying
+                    // so beats leaving a gap that reads as "no effect".
+                    return `<div class="line" style="grid-template-columns:1fr">
+                      <span class="tiny">Round totals unchanged &mdash; these holes moved by equal and opposite amounts.</span>
+                    </div>`;
+                  }
+                  return moved.map((k) => `
+                    <div class="line" style="grid-template-columns:56px 1fr">
+                      <span class="tiny">${k === 'total' ? 'Total' : CATEGORY_SHORT[k]}</span>
+                      <span class="mono tiny">${fmtSG(p.before[k])} &rarr; ${fmtSG(p.after[k])}
+                        <span class="${sgClass(p.after[k] - p.before[k])}">(${fmtSG(p.after[k] - p.before[k])})</span></span>
+                    </div>`).join('');
+                })()}
+                ${p.parMismatches.map((m) => `
+                  <div class="line" style="grid-template-columns:60px 1fr">
+                    <span class="tiny">Hole ${m.hole}</span>
+                    <span class="tiny sg-neg">par ${m.from} here, ${m.to} on the course &mdash; left alone</span>
+                  </div>`).join('')}
+              </div>
+            </div>`).join('')}
+
+          <p class="tiny" style="margin-top:10px">${benchNote()} Par is reported but never rewritten &mdash; changing it would rewrite the score-to-par of a round somebody actually played, which should be a deliberate act rather than a side effect.</p>
+          <button class="btn-flag" style="margin-top:8px" data-action="repair-apply">Correct ${plan.changed.length} Round${plan.changed.length === 1 ? '' : 's'}</button>
+        ` : `<p class="muted">Every round in scope already matches its scorecard. Running this again would do nothing, which is how it is meant to behave.</p>`}
+
+        ${plan.blocked.length ? `
+          <div class="fairway-divider"></div>
+          <p class="tiny">These could not be checked:</p>
+          ${plan.blocked.map((p) => `
+            <p class="tiny">${esc(p.player)} &middot; ${fmtDate(p.date)} &middot; ${esc(p.courseName)} &mdash; ${esc(p.reason)}</p>
+          `).join('')}` : ''}
+      </div>` : ''}
+
+    <button class="btn-ghost" data-action="goto-settings">&larr; Back</button>`;
 }
 
 function screenCourseImport() {
@@ -2721,9 +2832,19 @@ function screenCourseEdit() {
   const nine = course.nines[STATE.courseNineIdx] || course.nines[0];
   const tee = course.teeNames[STATE.courseTeeIdx] || course.teeNames[0];
   const problems = validateNine(nine, tee);
+  // Warnings, not problems: these never block a save. A real course
+  // can have a 95-yard par 3, and an editor that argued would be wrong
+  // more often than the person typing.
+  const odd = yardageWarnings(course, tee);
 
   return `${topbar('Scorecard')}
     ${notices()}
+    ${odd.length ? `<div class="card">
+      <h2>Worth a second look</h2>
+      <p class="muted">Nothing here stops you saving. These are just the numbers that would be unusual on a real card, from the ${esc(tee)} tees.</p>
+      ${odd.map((w) => `<p class="tiny" style="color:var(--flag)">${esc(w)}</p>`).join('')}
+      <p class="tiny">A par 4 entered at 530 yards and a par 5 at 306 is how three rounds got scored against the wrong card once already &mdash; the two had been swapped, and nothing said so until the strokes gained came out strange.</p>
+    </div>` : ''}
     <div class="card">
       <label>Course name</label>
       <input type="text" id="courseName" value="${esc(course.name)}" placeholder="Gardner Golf Course">
@@ -2856,6 +2977,7 @@ const SCREENS = {
   courses: screenCourses,
   courseImport: screenCourseImport,
   courseEdit: screenCourseEdit,
+  repair: screenRepair,
 };
 
 let lastScreen = null;
@@ -3905,6 +4027,54 @@ const ACTIONS = {
     sync.syncInBackground(null, { force: true });
   },
 
+  /* --- Scorecard repair ------------------------------------------ */
+
+  'goto-repair': () => go('repair', { repairPlan: null }),
+
+  'repair-preview': () => {
+    const result = planRepair(
+      store.getRounds(),
+      (round) => safeCourse(round.courseId),
+      { courseId: STATE.repairCourseId, benchmark: bench() }
+    );
+    // Printed as well as shown, because a diff you can copy out of a
+    // console is a diff you can paste to somebody and argue about.
+    console.info('[ledger] scorecard repair\n' + describePlan(result));
+    STATE.repairPlan = result;
+    STATE.notice = result.changed.length
+      ? `${result.changed.length} round${result.changed.length === 1 ? '' : 's'} differ from the saved card. Nothing written yet.`
+      : 'Everything in scope already matches.';
+    render();
+  },
+
+  'repair-apply': () => {
+    const plan = STATE.repairPlan;
+    if (!plan || !plan.changed.length) return;
+    if (!confirm(`Correct ${plan.changed.length} round${plan.changed.length === 1 ? '' : 's'}? `
+      + 'The shots are untouched — only the yardages they were played against change.')) return;
+
+    plan.changed.forEach((p) => store.saveRound(p.repaired));
+    const count = plan.changed.length;
+
+    // Re-plan straight away rather than trusting the write: running it
+    // twice must find nothing, and this is the cheapest way to show
+    // that it does.
+    const after = planRepair(
+      store.getRounds(),
+      (round) => safeCourse(round.courseId),
+      { courseId: STATE.repairCourseId, benchmark: bench() }
+    );
+    console.info('[ledger] after repair\n' + describePlan(after));
+
+    go('repair', {
+      repairPlan: after,
+      notice: `Corrected ${count} round${count === 1 ? '' : 's'}. `
+        + `${after.changed.length ? 'Some still differ — check the list.' : 'Nothing left to correct.'} `
+        + 'Everyone else picks these up on their next sync.',
+    });
+    sync.syncInBackground(null, { force: true });
+  },
+
   /* --- Roster ---------------------------------------------------- */
 
   'refresh-roster': () => runSync('Roster refresh', async () => {
@@ -4045,7 +4215,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window],[data-repair-course]');
   if (!target) return;
 
   const benchmark = target.getAttribute('data-benchmark');
@@ -4056,6 +4226,13 @@ function onClick(event) {
 
   const missMode = target.getAttribute('data-miss-mode');
   if (missMode) { STATE.missMode = missMode; return render(); }
+
+  const repairCourse = target.getAttribute('data-repair-course');
+  if (repairCourse !== null) {
+    STATE.repairCourseId = repairCourse || null;
+    STATE.repairPlan = null;
+    return render();
+  }
 
   const hcpWindow = target.getAttribute('data-hcp-window');
   if (hcpWindow) {

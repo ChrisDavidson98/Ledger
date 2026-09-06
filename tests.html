@@ -42,6 +42,7 @@ import * as CH from './src/charts.js';
 // safe — it has no side effects at load — but nothing below may read
 // or write localStorage, or opening this page would edit real data.
 import * as ST from './src/storage.js';
+import * as RP from './src/repair.js';
 import { SEED_COURSES } from './src/seed.js';
 
 const results = [];
@@ -1223,6 +1224,205 @@ check('a row with active left blank counts as active', () => {
   const bare = [{ player: 'Dakota' }];
   if (ST.activeNames(bare).length !== 1) return 'blank active read as off';
   return eq(ST.findInRoster('dakota', bare, []).status, 'ok', 'status');
+});
+
+/* --- Scorecard repair ----------------------------------------------
+   A round stores the yardages it was played against, so correcting a
+   course does nothing for rounds already on it. These cover the real
+   case: Iron Horse holes 8 and 9 transposed — a par 4 at 530 and a
+   par 5 at 306 — with three players scored against the bad card.
+-------------------------------------------------------------------- */
+
+suite('Scorecard repair');
+
+/* Built as a literal rather than through upsertCourse, because
+   nothing in this file may touch storage. */
+function ironHorse(rows) {
+  return {
+    id: 'iron_horse',
+    name: 'Iron Horse',
+    city: '',
+    verified: true,
+    teeNames: ['White'],
+    combos: [],
+    nines: [{
+      id: 'ih_main',
+      name: 'Main',
+      holes: rows.map(([par, yards], i) => ({ hole: i + 1, par, yards: { White: yards } })),
+    }],
+  };
+}
+
+const IH_WRONG = [[4, 380], [4, 410], [3, 165], [5, 505], [4, 395], [4, 350], [3, 190], [4, 530], [5, 306]];
+const IH_RIGHT = [[4, 380], [4, 410], [3, 165], [5, 505], [4, 395], [4, 350], [3, 190], [4, 306], [5, 530]];
+
+/** A nine-hole round played against whichever card is passed in. */
+function ironHorseRound(rows, player = 'Chris') {
+  const r = roundOf(rows.map(([par, yards]) => ({
+    par,
+    yards,
+    shots: [
+      shot('tee', yards, 'fairway', 60),
+      shot('fairway', 60, 'green', 18),
+      shot('green', 18, 'green', 2),
+      shot('green', 2, null, null, { holed: true }),
+    ],
+  })));
+  r.player = player;
+  r.courseId = 'iron_horse';
+  r.courseName = 'Iron Horse';
+  r.teeName = 'White';
+  return r;
+}
+
+check('the layout is worked out from the pars, not from the round', () => {
+  // It has to be, because sourceNine and layout do not survive the
+  // sheet — anybody else's round arrives without them, and those are
+  // exactly the rounds that need repairing.
+  const round = ironHorseRound(IH_WRONG);
+  delete round.layout;
+  round.holes.forEach((h) => { delete h.sourceNine; delete h.sourceHole; });
+  const found = RP.inferPlayOption(ironHorse(IH_RIGHT), round);
+  return found.status === 'exact' ? null : `status ${found.status}`;
+});
+
+check('a transposed pair is spotted and both holes reported', () => {
+  const plan = RP.planRoundRepair(ironHorseRound(IH_WRONG), ironHorse(IH_RIGHT));
+  if (!plan.ok) return plan.reason;
+  if (!plan.changed) return 'reported nothing to change';
+  const moved = plan.holes.map((h) => `${h.hole}:${h.from}->${h.to}`).join(' ');
+  return moved === '8:530->306 9:306->530' ? null : moved;
+});
+
+check('the per-hole strokes gained moves even when the round total does not', () => {
+  // The whole trap: two holes swapped move by equal and opposite
+  // amounts, so a report showing only round totals would say a real
+  // error had no effect.
+  const plan = RP.planRoundRepair(ironHorseRound(IH_WRONG), ironHorse(IH_RIGHT));
+  const eight = plan.holes.find((h) => h.hole === 8);
+  const nine = plan.holes.find((h) => h.hole === 9);
+  const d8 = eight.sgAfter - eight.sgBefore;
+  const d9 = nine.sgAfter - nine.sgBefore;
+  if (Math.abs(d8) < 1) return `hole 8 barely moved: ${d8.toFixed(2)}`;
+  if (!near(d8, -d9, 0.01)) return `holes moved by ${d8.toFixed(2)} and ${d9.toFixed(2)}`;
+  return near(plan.after.total - plan.before.total, 0, 0.01)
+    ? null : 'the round total moved when it should have cancelled';
+});
+
+check('repairing pulls the tee shot along with the hole', () => {
+  // The one value that was wrong. Every later shot started where the
+  // previous one finished, and those were typed in by hand.
+  const round = ironHorseRound(IH_WRONG);
+  const plan = RP.planRoundRepair(round, ironHorse(IH_RIGHT));
+  const fixed = plan.repaired;
+  if (fixed.holes[7].yards !== 306) return `hole 8 yards ${fixed.holes[7].yards}`;
+  if (fixed.holes[7].shots[0].startDist !== 306) return `tee shot ${fixed.holes[7].shots[0].startDist}`;
+  // And nothing downstream was disturbed.
+  return eq(fixed.holes[7].shots[1].startDist, 60, 'second shot start');
+});
+
+check('scores are not touched by a repair', () => {
+  const round = ironHorseRound(IH_WRONG);
+  const plan = RP.planRoundRepair(round, ironHorse(IH_RIGHT));
+  if (M.roundScore(plan.repaired) !== M.roundScore(round)) return 'score changed';
+  return eq(M.roundToPar(plan.repaired), M.roundToPar(round), 'to par');
+});
+
+check('running it on an already-correct round is a no-op', () => {
+  const plan = RP.planRoundRepair(ironHorseRound(IH_RIGHT), ironHorse(IH_RIGHT));
+  if (!plan.ok) return plan.reason;
+  return plan.changed ? 'reported a change against a matching card' : null;
+});
+
+check('running it twice changes nothing the second time', () => {
+  const rounds = [ironHorseRound(IH_WRONG, 'Chris'), ironHorseRound(IH_WRONG, 'Kaden')];
+  rounds.forEach((r, i) => { r.id = 'r' + i; });
+  const course = ironHorse(IH_RIGHT);
+  const first = RP.planRepair(rounds, () => course);
+  if (first.changed.length !== 2) return `first pass fixed ${first.changed.length}`;
+  const second = RP.planRepair(first.changed.map((p) => p.repaired), () => course);
+  return second.changed.length === 0 ? null : `second pass wanted ${second.changed.length} more`;
+});
+
+check('everybody who played the bad card is repaired in one go', () => {
+  // Three players, one invocation. Asking each of them to run it on
+  // their own phone would mean two of them never did.
+  const rounds = ['Chris', 'Kaden', 'Manny'].map((p, i) => {
+    const r = ironHorseRound(IH_WRONG, p);
+    r.id = 'r' + i;
+    return r;
+  });
+  const result = RP.planRepair(rounds, () => ironHorse(IH_RIGHT));
+  return eq(result.changed.map((p) => p.player).join(','), 'Chris,Kaden,Manny', 'players repaired');
+});
+
+check('a par that disagrees is reported and left alone', () => {
+  // Changing par rewrites the score-to-par of a round somebody
+  // actually played. That is a deliberate act, not a side effect.
+  const wrongPar = IH_RIGHT.map((row, i) => (i === 0 ? [5, row[1]] : row));
+  const round = ironHorseRound(IH_RIGHT);
+  const plan = RP.planRoundRepair(round, ironHorse(wrongPar));
+  // Pars no longer match any layout, so it refuses rather than guessing.
+  return plan.ok === false ? null : 'silently accepted a round whose pars do not match';
+});
+
+check('a missing course is refused with a reason, not skipped', () => {
+  const result = RP.planRepair([ironHorseRound(IH_WRONG)], () => null);
+  if (result.blocked.length !== 1) return 'not reported as blocked';
+  return result.blocked[0].reason ? null : 'blocked without saying why';
+});
+
+check('a tee that is not on the card is refused rather than guessed', () => {
+  const round = ironHorseRound(IH_WRONG);
+  round.teeName = 'Gold';
+  const plan = RP.planRoundRepair(round, ironHorse(IH_RIGHT));
+  return plan.ok === false ? null : 'accepted a tee the course does not have';
+});
+
+/* --- Course sanity warnings ----------------------------------------- */
+
+suite('Course warnings');
+
+check('a par 4 at 530 yards is flagged', () => {
+  // The one that would have caught this at entry.
+  const warnings = C.yardageWarnings(ironHorse(IH_WRONG), 'White');
+  return warnings.some((w) => /hole 8/.test(w) && /530/.test(w))
+    ? null : `got ${JSON.stringify(warnings)}`;
+});
+
+check('a par 5 at 306 yards is flagged too', () => {
+  const warnings = C.yardageWarnings(ironHorse(IH_WRONG), 'White');
+  return warnings.some((w) => /hole 9/.test(w) && /306/.test(w))
+    ? null : `got ${JSON.stringify(warnings)}`;
+});
+
+check('a correct card produces no noise at all', () => {
+  // A warning that cries wolf on a normal scorecard gets ignored, and
+  // then it is not there when it matters.
+  const warnings = C.yardageWarnings(ironHorse(IH_RIGHT), 'White');
+  return warnings.length ? `warned about ${JSON.stringify(warnings)}` : null;
+});
+
+check('a par 4 longer than a par 5 is called out as possibly swapped', () => {
+  // The strongest signal, and the one that matches the shape of this
+  // bug. Absolute bands have to stay loose enough for forward tees;
+  // comparing pars against each other does not, because whatever the
+  // tee, the par 5s are the long holes.
+  const warnings = C.yardageWarnings(ironHorse(IH_WRONG), 'White');
+  return warnings.some((w) => /right way round/.test(w))
+    ? null : `got ${JSON.stringify(warnings)}`;
+});
+
+check('every seeded course passes without a warning', () => {
+  // These were transcribed from the paper cards, so any warning here
+  // is the check being too fussy rather than the card being wrong.
+  const noisy = [];
+  SEED_COURSES.forEach((course) => {
+    (course.teeNames || []).forEach((tee) => {
+      C.yardageWarnings(course, tee).forEach((w) => noisy.push(`${course.name} ${tee}: ${w}`));
+    });
+  });
+  return noisy.length ? noisy.slice(0, 3).join(' | ') : null;
 });
 
 /* --- Render ----------------------------------------------------- */
