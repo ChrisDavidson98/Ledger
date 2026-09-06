@@ -156,6 +156,7 @@ const STATE = {
   missMode: 'count',     // miss grid shaded by frequency, or by cost
   repairPlan: null,      // previewed scorecard repair, before anything is written
   repairCourseId: null,
+  rosterState: null,     // what the last roster read managed, shown at the gate
   archive: null,
   editShotIdx: null,
   syncBusy: false,
@@ -308,6 +309,15 @@ function screenLogin() {
         ? 'This device is not unlocked yet. Enter the passphrase and your name.'
         : 'Enter your name to continue.'}</p>
       ${STATE.error ? `<div class="err-box">${esc(STATE.error)}</div>` : ''}
+      ${STATE.error && STATE.rosterState ? `<p class="tiny">Player list: ${
+        STATE.rosterState.unconfigured
+          ? 'not connected to a sheet — using the names built into the app'
+          : STATE.rosterState.error
+            ? `could not be read (${esc(STATE.rosterState.error)})`
+            : STATE.rosterState.empty
+              ? 'reached the sheet, but the players tab is empty'
+              : `${STATE.rosterState.count} name${STATE.rosterState.count === 1 ? '' : 's'} read from the sheet`
+      }. Show this line to Chris if it keeps happening.</p>` : ''}
 
       ${locked ? `
         <label>Passphrase</label>
@@ -3845,9 +3855,21 @@ const ACTIONS = {
     // get in it can be read off their phone instead of guessed at.
     console.info(
       `[ledger] roster: ${roster.players.length} from ${roster.source}`
+      + `${roster.unconfigured ? ' (no sheet on this device)' : ''}`
       + `${roster.empty ? ' (sheet tab is empty)' : ''}`
       + `${roster.error ? ` — ${roster.error.message}` : ''}`
     );
+
+    // And kept for the screen. A console on a phone is not somewhere
+    // anybody is going to look, and the first time this went wrong it
+    // cost a round of guessing that one line would have settled.
+    STATE.rosterState = {
+      count: roster.players.length,
+      source: roster.source,
+      unconfigured: Boolean(roster.unconfigured),
+      empty: Boolean(roster.empty),
+      error: roster.error ? roster.error.message : null,
+    };
 
     const found = store.lookupPlayer(typed);
 
@@ -3857,15 +3879,26 @@ const ACTIONS = {
     }
 
     if (found.status !== 'ok') {
-      // An unknown name means different things depending on how fresh
-      // the list is, and saying so is the difference between somebody
-      // waiting for Chris and somebody walking outside for signal.
-      // Keyed on an actual failed read rather than on the source, so a
-      // device with no sheet at all is not told it lost a connection
-      // it never had.
-      STATE.error = roster.error
-        ? 'Could not reach the player list, so this is the last one this phone saw. Check your connection and try again.'
-        : `${typed.trim()} is not on the roster yet. Ask Chris to add you.`;
+      /*
+       * Four different things send somebody away, and they need four
+       * different sentences. Collapsing them is what made this hard to
+       * diagnose the first time: "you are not on the roster" was said
+       * to a phone that had never looked at the roster, which sent the
+       * wrong person to fix the wrong thing.
+       *
+       * The order matters. Not connected beats could-not-reach, which
+       * beats nobody-on-the-list, which beats genuinely-not-on-it —
+       * each one is a reason the next check could not be trusted.
+       */
+      if (roster.unconfigured) {
+        STATE.error = 'This phone is not connected to the shared sheet yet, so it only knows the names built into the app. Ask Chris for the setup link.';
+      } else if (roster.error) {
+        STATE.error = 'Could not reach the player list, so this is the last one this phone saw. Check your connection and try again.';
+      } else if (roster.empty) {
+        STATE.error = 'The shared player list is empty, so this phone fell back to the names built into the app. Ask Chris to add you to the players tab.';
+      } else {
+        STATE.error = `${typed.trim()} is not on the roster yet. Ask Chris to add you.`;
+      }
       return render();
     }
 

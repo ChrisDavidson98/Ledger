@@ -586,8 +586,12 @@ export async function loadRoster() {
 
   if (!isConfigured()) {
     // No sheet on this device at all, so there is nothing to be stale
-    // against — the local list is the only list there is.
-    return { players: cached, source: cached.length ? 'cache' : 'local' };
+    // against — the local list is the only list there is. Reported
+    // distinctly because it is NOT the same as "you are not on the
+    // roster": nothing has looked at the roster, and telling somebody
+    // they are missing from a list nobody consulted sends them to ask
+    // the wrong person for the wrong thing.
+    return { players: cached, source: 'local', unconfigured: true };
   }
 
   try {
