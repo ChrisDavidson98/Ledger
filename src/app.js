@@ -157,6 +157,7 @@ const STATE = {
   repairPlan: null,      // previewed scorecard repair, before anything is written
   repairCourseId: null,
   rosterState: null,     // what the last roster read managed, shown at the gate
+  setupPaste: '',        // a setup link pasted in by hand at the gate
   archive: null,
   editShotIdx: null,
   syncBusy: false,
@@ -308,6 +309,7 @@ function screenLogin() {
       <p class="muted">${locked
         ? 'This device is not unlocked yet. Enter the passphrase and your name.'
         : 'Enter your name to continue.'}</p>
+      ${STATE.notice ? `<div class="ok-box">${esc(STATE.notice)}</div>` : ''}
       ${STATE.error ? `<div class="err-box">${esc(STATE.error)}</div>` : ''}
       ${STATE.error && STATE.rosterState ? `<p class="tiny">Player list: ${
         STATE.rosterState.unconfigured
@@ -334,14 +336,28 @@ function screenLogin() {
       </button>
 
       ${locked ? `<p class="tiny">The passphrase is checked against the sheet, so a wrong one reaches no data at all. It is asked for once per device.</p>` : ''}
-      ${!sync.hasUrl() ? `<p class="tiny">No sheet is connected on this device, so rounds stay local until one is set up in Settings.</p>` : ''}
     </div>
 
-    ${locked && isStandalone() === false ? `
+    ${!sync.hasUrl() ? `
       <div class="card">
-        <h2>Add to your home screen first</h2>
-        <p class="muted">On a phone, the home screen version keeps its own separate data from the browser tab. Add it <em>before</em> signing in and you only have to do this once.</p>
-        <p class="tiny">iPhone: Share, then Add to Home Screen. Android: the browser menu, then Install or Add to Home screen. Then open it from the icon and sign in there.</p>
+        <h2>Connect this device</h2>
+        <p class="muted">This one has no sheet behind it, so it only knows the names built into the app and nothing you log here will reach anybody else.</p>
+        <p class="tiny">Opening a setup link usually does this for you. It does not survive <strong>Add to Home Screen</strong> on an iPhone &mdash; the icon launches the app's own start address and drops the part of the link that matters, and a home-screen app keeps its own storage separate from Safari. So paste the link here instead.</p>
+
+        <label>Setup link</label>
+        <input type="text" id="setupPaste" placeholder="Paste the whole link Chris sent you"
+               value="${esc(STATE.setupPaste || '')}"
+               autocapitalize="off" autocorrect="off" spellcheck="false">
+        <button class="btn-ghost" style="margin-top:10px" data-action="connect-device">Connect</button>
+        <p class="tiny">The link carries the sheet address only, never the passphrase &mdash; you will be asked for that next.</p>
+      </div>` : ''}
+
+    ${isStandalone() === false ? `
+      <div class="card">
+        <h2>Adding it to your home screen</h2>
+        <p class="muted">The home screen version keeps its own data, separate from this browser tab. Whichever one you sign into is the one to keep using.</p>
+        <p class="tiny">iPhone: Share, then Add to Home Screen. Android: the browser menu, then Install or Add to Home screen.</p>
+        <p class="tiny"><strong>On an iPhone the icon will not inherit the setup link.</strong> It launches the app's own start address, which drops the part of the link that points at the sheet, and the icon's storage is separate from this tab's &mdash; so it opens knowing nothing. Copy the link Chris sent you, open the app from the icon, and paste it into <em>Connect this device</em> there. That is the whole of it, once.</p>
       </div>` : ''}`;
 }
 
@@ -3023,6 +3039,11 @@ function bindLiveInputs() {
     courseName.oninput = (e) => { STATE.courseDraft.name = e.target.value; };
   }
 
+  const setupPaste = document.getElementById('setupPaste');
+  if (setupPaste) {
+    setupPaste.oninput = (e) => { STATE.setupPaste = e.target.value; };
+  }
+
   const loginPass = document.getElementById('loginPass');
   if (loginPass) {
     loginPass.oninput = (e) => { STATE.passDraft = e.target.value; };
@@ -3910,6 +3931,30 @@ const ACTIONS = {
     go(activeScreen());
     sync.clearSetupParam();
     sync.syncInBackground(refreshIfIdle, { force: true });
+  },
+
+  /**
+   * Point a device at the sheet from the gate itself.
+   *
+   * Settings would be the natural home for this and is the wrong one:
+   * it sits behind the sign-in, and a device that cannot sign in
+   * cannot reach it. That was survivable while the setup link always
+   * worked, and it stopped being survivable on the iPhone route, where
+   * adding to the home screen drops the link and hands the new
+   * container no way of ever being told about the sheet.
+   */
+  'connect-device': () => {
+    const pasted = (document.getElementById('setupPaste') || {}).value || STATE.setupPaste;
+    const url = sync.readSetupText(pasted);
+    if (!url) {
+      STATE.error = 'That does not look like a setup link. It should be the whole link, or the sheet address ending in /exec.';
+      return render();
+    }
+    sync.connectTo(url);
+    STATE.setupPaste = '';
+    STATE.error = null;
+    STATE.notice = 'Connected. Enter the passphrase and your name.';
+    render();
   },
 
   'copy-setup-link': async () => {

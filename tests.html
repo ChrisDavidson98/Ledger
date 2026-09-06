@@ -1226,6 +1226,45 @@ check('a row with active left blank counts as active', () => {
   return eq(ST.findInRoster('dakota', bare, []).status, 'ok', 'status');
 });
 
+/* --- Connecting a device --------------------------------------------
+   A setup link works in Safari and does NOT survive Add to Home
+   Screen on an iPhone: the icon launches the manifest's start_url,
+   which has no query string, and the icon's storage is separate from
+   the tab's. So the link has to be pasteable by hand, and this is the
+   parsing behind that box.
+-------------------------------------------------------------------- */
+
+suite('Connecting a device');
+
+const EXEC = 'https://script.google.com/macros/s/AKfycbxEXAMPLE123/exec';
+const SETUP_LINK = `https://example.github.io/Ledger/?s=${
+  btoa(EXEC).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
+
+check('a whole setup link gives up the sheet address', () => eq(
+  S.readSetupText(SETUP_LINK), EXEC, 'url'));
+
+check('the bare /exec address is accepted too', () => eq(
+  S.readSetupText(EXEC), EXEC, 'url'));
+
+check('surrounding whitespace does not matter', () => eq(
+  S.readSetupText(`  ${SETUP_LINK}\n`), EXEC, 'url'));
+
+check('anything else is refused rather than half-accepted', () => {
+  const junk = ['', '   ', 'hello there', 'https://example.com/', SETUP_LINK.replace(/s=.*/, 's=!!!!')];
+  const wrong = junk.filter((t) => S.readSetupText(t) !== null);
+  return wrong.length ? `accepted ${JSON.stringify(wrong)}` : null;
+});
+
+check('a link pointing somewhere that is not Apps Script is refused', () => {
+  // The address is not a secret, but it is still the thing every
+  // round on this phone would get posted to.
+  const evil = 'https://evil.example.com/macros/s/x/exec';
+  if (S.readSetupText(evil) !== null) return 'accepted a foreign host';
+  const wrapped = `https://example.github.io/?s=${
+    btoa(evil).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
+  return S.readSetupText(wrapped) === null ? null : 'accepted a foreign host inside a link';
+});
+
 /* --- Scorecard repair ----------------------------------------------
    A round stores the yardages it was played against, so correcting a
    course does nothing for rounds already on it. These cover the real

@@ -110,6 +110,49 @@ export function setupLink(origin = window.location.href) {
   return `${base}?s=${encoded}`;
 }
 
+export const EXEC_URL = /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/;
+
+/**
+ * Pull a sheet address out of whatever somebody pasted.
+ *
+ * Accepts a whole setup link, or the bare /exec URL, because both are
+ * things people end up holding and neither is worth refusing over its
+ * shape. Returns null rather than throwing on anything else.
+ *
+ * This exists because of a trap that has now caught somebody twice.
+ * A setup link works in Safari, but adding THAT PAGE to the home
+ * screen launches the manifest's start_url instead of the URL you were
+ * looking at, so the ?s= never reaches the home-screen container — and
+ * a home-screen app is separate storage, so it starts with no sheet at
+ * all. Keeping the parameter in the address bar, which is what the
+ * comment below solved, does not help when the manifest is what drops
+ * it. So the link has to be pasteable by hand as well.
+ */
+export function readSetupText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+
+  const match = raw.match(/[?&]s=([A-Za-z0-9\-_]+)/);
+  if (match) {
+    try {
+      const padded = match[1].replace(/-/g, '+').replace(/_/g, '/');
+      const url = atob(padded);
+      if (EXEC_URL.test(url)) return url;
+    } catch (err) {
+      /* not a setup link after all; fall through to the raw form */
+    }
+  }
+
+  return EXEC_URL.test(raw) ? raw : null;
+}
+
+/** Point this device at a sheet. The passphrase is asked for separately. */
+export function connectTo(url) {
+  if (!EXEC_URL.test(url)) return false;
+  setConfig({ url, secret: '' });
+  return true;
+}
+
 /**
  * Consume a ?s= parameter on load. Only applies when this device has
  * no sheet yet, so a link can never silently repoint a working phone
@@ -123,7 +166,7 @@ export function applySetupLink() {
 
     const padded = encoded.replace(/-/g, '+').replace(/_/g, '/');
     const url = atob(padded);
-    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) return false;
+    if (!EXEC_URL.test(url)) return false;
 
     const existing = getConfig().url;
     if (existing === url) return false;
