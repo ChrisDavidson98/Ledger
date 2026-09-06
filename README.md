@@ -181,9 +181,22 @@ tables and the next export improves with them.
 
 ## Signing in and sharing
 
-A name typed into a box, matched against a roster held on the device, editable
-under **Rounds → Settings**. The passphrase is the sheet secret, so a wrong one
+A name typed into a box, matched against a roster **held on the sheet** and
+pulled fresh at the gate. The passphrase is the sheet secret, so a wrong one
 reaches no data at all — it is asked for once per device.
+
+The order matters and is not the obvious one: the passphrase is checked *first*,
+because the roster lives behind it, and only then is the name looked up. Adding
+a player is one row in the `players` tab, or **Settings → Who can sign in** on
+any phone. The roster is read network-first and cached, so a name added a minute
+ago works immediately, and a clubhouse with no signal still lets in somebody who
+has been playing for a year.
+
+This was per-device until it bit: a new player was added on one phone, which did
+nothing whatsoever on his, and the gate turned him away with a message blaming
+his device. Every outcome at the gate now says which of the four things went
+wrong, and the roster load logs its count and source to the console so the next
+one is diagnosable from the phone it happened on.
 
 To add a phone: **Settings → Copy Setup Link**. The link carries the sheet
 address only, never the passphrase; send that separately. Open the link, add to

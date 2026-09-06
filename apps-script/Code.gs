@@ -45,6 +45,24 @@ var SHEETS = {
     'notes', 'group_id', 'status', 'created_at', 'updated_at', 'deleted_at',
     'layout_key', 'holes',
   ],
+  /*
+   * Who is allowed to sign in, shared by everyone.
+   *
+   * This used to live in each phone's own storage, which meant adding
+   * somebody on your phone did nothing at all on theirs — they reached
+   * the gate, typed a name nothing had heard of, and were turned away.
+   *
+   * Adding a player is meant to be one row typed straight into this
+   * tab: name in the first column, everything else blank. So `active`
+   * is read as TRUE when it is empty, and the timestamps are filled in
+   * by the app if it ever writes the row back. Nothing here needs a
+   * code change or a redeploy.
+   *
+   * `active` is how access is revoked. Deleting the row would work
+   * too, but it loses the record of who they were, and their rounds
+   * are still on the sheet regardless.
+   */
+  players: ['player', 'active', 'created_at', 'updated_at'],
   // A score-only round has no shots, so it writes one row per hole
   // with shot_num 0 carrying just the score. Without that its
   // hole-by-hole detail existed nowhere but the phone that entered it.
@@ -82,7 +100,7 @@ SHEETS.shots_archive = SHEETS.shots.slice();
  * "that phone is pointed at an older deployment" is otherwise
  * invisible from the client.
  */
-var CONTRACT = 7;
+var CONTRACT = 8;
 
 /*
  * The oldest client this deployment will accept WRITES from.
@@ -122,7 +140,7 @@ var MIN_CLIENT = 0;
 
 var WRITE_ACTIONS = {
   pushRounds: true, deleteRounds: true, restoreRounds: true,
-  cleanup: true, pushCourses: true, pushTeeTimes: true,
+  cleanup: true, pushCourses: true, pushTeeTimes: true, pushPlayers: true,
 };
 
 function doGet(e) {
@@ -133,7 +151,7 @@ function doGet(e) {
     minClient: MIN_CLIENT,
     actions: ['ping', 'setup', 'pushRounds', 'deleteRounds', 'listArchive',
       'restoreRounds', 'cleanup', 'pullRounds', 'pushCourses', 'pullCourses',
-      'pushTeeTimes', 'pullTeeTimes'],
+      'pushTeeTimes', 'pullTeeTimes', 'pushPlayers', 'pullPlayers'],
   });
 }
 
@@ -183,6 +201,8 @@ function doPost(e) {
       case 'pullCourses':  return respond(pullCourses());
       case 'pushTeeTimes': return respond(pushTeeTimes(body.teeTimes || []));
       case 'pullTeeTimes': return respond(pullTeeTimes());
+      case 'pushPlayers':  return respond(pushPlayers(body.players || []));
+      case 'pullPlayers':  return respond(pullPlayers());
       default:
         return respond({ ok: false, error: 'Unknown action: ' + body.action });
     }
@@ -631,6 +651,83 @@ function pullTeeTimes() {
 function asText(value, zone, pattern) {
   if (value instanceof Date) return Utilities.formatDate(value, zone, pattern);
   return String(value == null ? '' : value).replace(/^'/, '');
+}
+
+/* --- Players ------------------------------------------------------ */
+
+/**
+ * Everyone allowed to sign in.
+ *
+ * A blank `active` reads as TRUE on purpose: the documented way to add
+ * somebody is to type their name into the first column and nothing
+ * else, and a row that then failed to let them in would defeat the
+ * entire point of moving this off the phones.
+ *
+ * Names are handed back exactly as typed here. The client matches
+ * case-insensitively but stores and displays THIS spelling, so the
+ * sheet is what decides whether he is Dakota or dakota.
+ */
+function pullPlayers() {
+  var rows = readAll('players')
+    .filter(function (row) { return String(row.player || '').trim() !== ''; })
+    .map(function (row) {
+      return {
+        player: String(row.player).trim(),
+        active: isActive(row.active),
+        created_at: row.created_at ? String(row.created_at) : '',
+        updated_at: row.updated_at ? String(row.updated_at) : '',
+      };
+    });
+  return { ok: true, players: rows, serverTime: new Date().toISOString() };
+}
+
+/** Blank means active. Anything obviously negative means inactive. */
+function isActive(value) {
+  if (value === '' || value === null || value === undefined) return true;
+  if (value === true) return true;
+  if (value === false) return false;
+  var text = String(value).trim().toLowerCase();
+  if (text === '') return true;
+  return ['false', 'no', 'n', '0', 'inactive'].indexOf(text) === -1;
+}
+
+/**
+ * Upsert by name, touching ONLY the rows named in the payload.
+ *
+ * Deliberately not a whole-tab rewrite. Somebody typing a name
+ * straight into the sheet is the documented path, and a phone that
+ * had not synced since would otherwise wipe them out on its next
+ * write. Removing a player is done by setting active to FALSE, not by
+ * dropping the row.
+ */
+function pushPlayers(players) {
+  if (!players.length) return { ok: true, written: 0 };
+
+  var now = new Date().toISOString();
+  var existing = {};
+  readAll('players').forEach(function (row) {
+    var key = String(row.player || '').trim().toLowerCase();
+    if (key) existing[key] = row;
+  });
+
+  var names = [];
+  var rows = players.map(function (entry) {
+    var name = String(entry.player || '').trim();
+    var was = existing[name.toLowerCase()] || {};
+    names.push(name);
+    // Match on the stored spelling too, so an upsert replaces the row
+    // rather than leaving a second one differing only in case.
+    if (was.player && String(was.player) !== name) names.push(String(was.player));
+    return {
+      player: name,
+      active: entry.active === false ? 'FALSE' : 'TRUE',
+      created_at: was.created_at ? String(was.created_at) : now,
+      updated_at: now,
+    };
+  }).filter(function (row) { return row.player !== ''; });
+
+  replaceRows('players', 'player', names, rows);
+  return { ok: true, written: rows.length };
 }
 
 /* --- Courses ----------------------------------------------------- */

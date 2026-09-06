@@ -20,6 +20,8 @@ const KEYS = {
   deleteQueue: PREFIX + 'delete_queue',
   teeTimes: PREFIX + 'tee_times',
   teeTimeQueue: PREFIX + 'tee_time_queue',
+  players: PREFIX + 'players',
+  rosterSource: PREFIX + 'roster_source',
 };
 
 function read(key, fallback) {
@@ -61,16 +63,50 @@ export function clearPlayer() {
 const DEFAULT_ROSTER = ['Chris', 'Kaden', 'Manny'];
 
 /**
- * Who may sign in on this device. Editable from Settings so a fourth
- * name never needs a code change. Per-device by design — this is
- * identity, not security. What actually keeps strangers out of the
- * data is the shared secret on the sheet.
+ * Who may sign in.
+ *
+ * This used to be a per-device list, which was a mistake with a very
+ * specific failure: adding somebody on YOUR phone did nothing at all
+ * on theirs. They opened the app, typed a name their phone had never
+ * heard of, and were turned away by a message blaming their device.
+ * Nothing was broken; the list simply never travelled.
+ *
+ * It now lives on the sheet and is pulled at the gate. The per-device
+ * list survives underneath as the fallback, for two cases that both
+ * matter: a phone with no sheet configured at all, and the window
+ * between deploying this and anybody typing a name into the new tab.
+ * Falling back beats locking everyone out.
  */
+export function getPlayers() {
+  const stored = read(KEYS.players, null);
+  return Array.isArray(stored) ? stored : [];
+}
+
+/** Cache the shared roster, with where it came from and when. */
+export function setPlayers(players, source = 'network') {
+  write(KEYS.players, players);
+  write(KEYS.rosterSource, { source, at: new Date().toISOString(), count: players.length });
+}
+
+/** What the last roster load managed, for the message at the gate. */
+export function rosterOrigin() {
+  return read(KEYS.rosterSource, null);
+}
+
+/** True once the sheet has anybody on it, which changes what Settings offers. */
+export function hasSharedRoster() {
+  return getPlayers().length > 0;
+}
+
+/** Active names only — the list every other screen means by "the roster". */
 export function getRoster() {
+  const shared = activeNames(getPlayers());
+  if (shared.length) return shared;
   const stored = read(KEYS.roster, null);
   return Array.isArray(stored) && stored.length ? stored : [...DEFAULT_ROSTER];
 }
 
+/** The local fallback list, kept for a device with no sheet behind it. */
 export function setRoster(names) {
   const cleaned = names
     .map((n) => String(n).trim())
@@ -84,6 +120,45 @@ export function matchPlayer(name) {
   const wanted = String(name || '').trim().toLowerCase();
   if (!wanted) return null;
   return getRoster().find((n) => n.toLowerCase() === wanted) || null;
+}
+
+/** Active names out of a set of player records. */
+export function activeNames(players) {
+  return (players || []).filter((p) => p.active !== false).map((p) => p.player);
+}
+
+/**
+ * Match a typed name against a roster, and say WHY when it fails.
+ *
+ * Pure, and separated from storage for exactly that reason: it is the
+ * piece the gate hangs on, so it should be testable without a device
+ * to write to. `shared` is the sheet's list; `local` is the per-device
+ * fallback used only when the sheet has nobody on it yet.
+ *
+ * The gate needs the difference between "no such player", "that
+ * account is switched off" and "you typed nothing", because each one
+ * needs a different sentence and a single null could not tell them
+ * apart. Matching is on trimmed lowercase both sides; what comes back
+ * is the roster's own spelling, never what was typed.
+ */
+export function findInRoster(name, shared, local) {
+  const wanted = String(name || '').trim().toLowerCase();
+  if (!wanted) return { status: 'empty', player: null };
+
+  if (shared && shared.length) {
+    const found = shared.find((p) => String(p.player).trim().toLowerCase() === wanted);
+    if (!found) return { status: 'missing', player: null };
+    if (found.active === false) return { status: 'inactive', player: found.player };
+    return { status: 'ok', player: found.player };
+  }
+
+  const fallback = (local || []).find((n) => String(n).trim().toLowerCase() === wanted);
+  return fallback ? { status: 'ok', player: fallback } : { status: 'missing', player: null };
+}
+
+/** The same, against whatever this device currently holds. */
+export function lookupPlayer(name) {
+  return findInRoster(name, getPlayers(), getRoster());
 }
 
 /* --- Preferences ------------------------------------------------- */

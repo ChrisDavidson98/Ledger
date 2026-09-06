@@ -38,6 +38,10 @@ import * as H from './src/handicap.js';
 import * as E from './src/brief.js';
 import * as SCH from './src/schedule.js';
 import * as CH from './src/charts.js';
+// Only the PURE helpers are called from here. Importing the module is
+// safe — it has no side effects at load — but nothing below may read
+// or write localStorage, or opening this page would edit real data.
+import * as ST from './src/storage.js';
 import { SEED_COURSES } from './src/seed.js';
 
 const results = [];
@@ -1148,6 +1152,77 @@ check('a round logged before the calendar existed still works throughout', () =>
   delete summary.group_id;
   const back = S.rebuildRound(summary, flat.shots);
   return back.groupId === null ? null : `rebuilt as ${JSON.stringify(back.groupId)}`;
+});
+
+/* --- Roster --------------------------------------------------------
+   The gate hangs on these. The bug that prompted them: a new player
+   typed his name, was turned away, and the message blamed his phone —
+   because the roster lived on each device and had never travelled.
+-------------------------------------------------------------------- */
+
+suite('Roster');
+
+const SHEET_ROSTER = [
+  { player: 'Chris', active: true },
+  { player: 'Kaden', active: true },
+  { player: 'Dakota', active: true },
+  { player: 'Retired Ron', active: false },
+];
+const LOCAL_ROSTER = ['Chris', 'Kaden', 'Manny'];
+
+check('a name on the sheet gets in', () => eq(
+  ST.findInRoster('Dakota', SHEET_ROSTER, LOCAL_ROSTER).status, 'ok', 'status'));
+
+check('case and stray spaces do not keep anybody out', () => {
+  const bad = ['dakota', 'DAKOTA', '  Dakota', 'Dakota  ', ' dAkOtA '];
+  const wrong = bad.filter((n) => ST.findInRoster(n, SHEET_ROSTER, LOCAL_ROSTER).status !== 'ok');
+  return wrong.length ? `rejected ${JSON.stringify(wrong)}` : null;
+});
+
+check('the roster decides the spelling, not the person typing', () => eq(
+  ST.findInRoster('  dAkOtA ', SHEET_ROSTER, LOCAL_ROSTER).player, 'Dakota', 'canonical name'));
+
+check('an unknown name is missing, not silently allowed', () => eq(
+  ST.findInRoster('Stranger', SHEET_ROSTER, LOCAL_ROSTER).status, 'missing', 'status'));
+
+check('an inactive player is turned away as inactive, not as unknown', () => {
+  // The two need different sentences at the gate, so they must not
+  // collapse into one answer here.
+  const found = ST.findInRoster('Retired Ron', SHEET_ROSTER, LOCAL_ROSTER);
+  if (found.status !== 'inactive') return `status ${found.status}`;
+  return eq(found.player, 'Retired Ron', 'name');
+});
+
+check('an empty name is its own answer', () => eq(
+  ST.findInRoster('   ', SHEET_ROSTER, LOCAL_ROSTER).status, 'empty', 'status'));
+
+check('the sheet wins over the list baked into the device', () => {
+  // Manny is in the local fallback but not on the sheet. Once the
+  // sheet has anybody at all, it is the only list that counts —
+  // otherwise turning somebody off would never take effect.
+  return eq(ST.findInRoster('Manny', SHEET_ROSTER, LOCAL_ROSTER).status, 'missing', 'status');
+});
+
+check('an empty sheet falls back rather than locking everyone out', () => {
+  // The window between deploying this and anybody filling in the tab.
+  // Refusing every name there would be a far worse bug than the one
+  // this replaced.
+  if (ST.findInRoster('Manny', [], LOCAL_ROSTER).status !== 'ok') return 'fallback did not apply';
+  return eq(ST.findInRoster('Stranger', [], LOCAL_ROSTER).status, 'missing', 'unknown name');
+});
+
+check('inactive players are left out of the roster everywhere else', () => {
+  // Same list feeds the calendar's invitee picker, so somebody
+  // switched off must not still be invitable.
+  return eq(ST.activeNames(SHEET_ROSTER).join(','), 'Chris,Kaden,Dakota', 'active names');
+});
+
+check('a row with active left blank counts as active', () => {
+  // Typing just a name into the sheet is the documented way to add
+  // somebody, so the other columns being empty has to mean yes.
+  const bare = [{ player: 'Dakota' }];
+  if (ST.activeNames(bare).length !== 1) return 'blank active read as off';
+  return eq(ST.findInRoster('dakota', bare, []).status, 'ok', 'status');
 });
 
 /* --- Render ----------------------------------------------------- */

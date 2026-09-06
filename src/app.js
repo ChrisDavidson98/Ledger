@@ -1088,14 +1088,7 @@ function screenSettings() {
           </div>`).join('')}
       </div>` : ''}
 
-    <div class="card">
-      <h2>Who can sign in</h2>
-      <p class="muted">One name per line. Anyone on this list can sign in on this device by typing their name.</p>
-      <textarea id="rosterBox" rows="${Math.max(4, store.getRoster().length + 1)}"
-        style="width:100%;padding:12px;border-radius:9px;border:1.5px solid var(--green-line);background:var(--paper);font-family:inherit;font-size:16px;color:var(--ink)">${esc(store.getRoster().join('\n'))}</textarea>
-      <button class="btn-ghost" style="margin-top:10px" data-action="save-roster">Save Names</button>
-      <p class="tiny">This list lives on this phone, so adding a name here does not add it on anyone else's. It is identity, not a lock &mdash; what actually keeps strangers out of the data is the sheet secret above.</p>
-    </div>
+    ${renderRosterCard()}
 
     <div class="card">
       <h2>Player</h2>
@@ -1110,6 +1103,77 @@ function screenSettings() {
     </div>
 
     <button class="btn-ghost" data-action="goto-history">&larr; Back</button>`;
+}
+
+/**
+ * Who can sign in — now one shared list rather than one per phone.
+ *
+ * The old version was a textarea of names in this device's storage,
+ * which read as though it controlled who could get in and did nothing
+ * of the sort for anybody else. This edits the sheet instead, so a
+ * name added here is a name that works on every phone.
+ *
+ * Nobody is ever removed, only switched off. Their rounds are on the
+ * sheet either way, and a list that forgets people who used to play
+ * is a worse record than one that remembers they stopped.
+ */
+function renderRosterCard() {
+  const shared = store.getPlayers();
+  const origin = store.rosterOrigin();
+  const configured = sync.isConfigured();
+
+  if (!configured) {
+    return `<div class="card">
+      <h2>Who can sign in</h2>
+      <p class="muted">No sheet is connected, so this device keeps its own list: ${esc(store.getRoster().join(', '))}.</p>
+      <p class="tiny">Connect a sheet above and the roster becomes shared &mdash; a name added on any phone works on all of them.</p>
+    </div>`;
+  }
+
+  if (!shared.length) {
+    return `<div class="card">
+      <h2>Who can sign in</h2>
+      <p class="muted">The <span class="mono">players</span> tab on the sheet is empty, so this device is still falling back to its own list: ${esc(store.getRoster().join(', '))}.</p>
+      <p class="tiny">Until somebody is on that tab, a new phone only knows the built-in names &mdash; which is exactly why a new player could not get in. Publish this list once and it becomes the shared one.</p>
+      <button class="btn-primary" data-action="publish-roster" ${STATE.syncBusy ? 'disabled' : ''}>Publish This List to the Sheet</button>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="refresh-roster" ${STATE.syncBusy ? 'disabled' : ''}>Check Again</button>
+      </div>
+      <p class="tiny">You can also just type names straight into the <span class="mono">players</span> tab &mdash; one name per row, everything else left blank.</p>
+    </div>`;
+  }
+
+  const active = shared.filter((p) => p.active !== false).length;
+
+  return `<div class="card">
+    <div class="split">
+      <h2>Who can sign in</h2>
+      <span class="tiny">${active} active${shared.length > active ? ` · ${shared.length - active} off` : ''}</span>
+    </div>
+    <p class="muted">Shared by everyone. A name added here works on every phone as soon as it syncs.</p>
+
+    ${shared.map((p) => {
+      const on = p.active !== false;
+      return `<div class="row">
+        <div class="badge" style="font-size:13px${on ? '' : ';opacity:0.4'}">${esc(String(p.player).slice(0, 2).toUpperCase())}</div>
+        <div class="row-meta" style="${on ? '' : 'opacity:0.55'}">
+          <div class="rname">${esc(p.player)}${p.player === STATE.player ? ' <span class="tiny">you</span>' : ''}</div>
+          <div class="rsub">${on ? 'Can sign in' : 'Inactive — cannot sign in'}</div>
+        </div>
+        <button class="chip ${on ? '' : 'active'}" data-action="toggle-player" data-name="${esc(p.player)}"
+                style="min-height:38px;padding:0 12px" ${STATE.syncBusy ? 'disabled' : ''}>${on ? 'Turn off' : 'Turn on'}</button>
+      </div>`;
+    }).join('')}
+
+    <div class="btn-row">
+      <button class="btn-primary" data-action="add-player" ${STATE.syncBusy ? 'disabled' : ''}>Add a Player</button>
+      <button class="btn-ghost" data-action="refresh-roster" ${STATE.syncBusy ? 'disabled' : ''}>Refresh</button>
+    </div>
+    ${origin ? `<p class="tiny">Last read from the ${esc(origin.source)} ${
+      origin.source === 'network' ? '' : '(this phone could not reach the sheet last time) '
+    }&middot; ${origin.count} name${origin.count === 1 ? '' : 's'}.</p>` : ''}
+    <p class="tiny">Turning somebody off blocks them at the gate and leaves every round they logged exactly where it is. This is identity, not a lock &mdash; what keeps strangers out of the data is the sheet secret above.</p>
+  </div>`;
 }
 
 function screenCourseImport() {
@@ -3604,24 +3668,37 @@ const ACTIONS = {
     go('login');
   },
 
+  /**
+   * The gate.
+   *
+   * The order matters and it is not the obvious one. The roster lives
+   * on the sheet now, and reaching the sheet needs the passphrase — so
+   * the passphrase has to be checked FIRST, and only then can the name
+   * be looked up. Matching the name first, as this used to, meant a
+   * brand new phone compared it against a list of three names baked in
+   * as a fallback and turned away everybody else.
+   *
+   * Every branch out of here renders something. The bug that started
+   * all this was not that the app rejected Dakota — it was that what
+   * it said, "not set up on this device", sounded like a fault with
+   * his phone and gave him nothing to do about it.
+   */
   'sign-in': async () => {
     const typed = (document.getElementById('loginName') || {}).value || STATE.loginDraft;
-    const matched = store.matchPlayer(typed);
-    if (!matched) {
-      STATE.loginDraft = typed;
-      STATE.error = 'That name is not set up on this device.';
+    STATE.loginDraft = typed;
+
+    if (!String(typed || '').trim()) {
+      STATE.error = 'Type your name to continue.';
       return render();
     }
 
-    // Check the passphrase before letting anyone in, when one is due.
+    // The passphrase unlocks the sheet, and the sheet holds the roster.
     if (sync.needsPassphrase()) {
       const pass = (document.getElementById('loginPass') || {}).value || STATE.passDraft;
       if (!pass) {
-        STATE.loginDraft = typed;
         STATE.error = 'The passphrase is needed to unlock this device.';
         return render();
       }
-      STATE.loginDraft = typed;
       STATE.passDraft = pass;
       STATE.syncBusy = true;
       STATE.error = null;
@@ -3637,10 +3714,43 @@ const ACTIONS = {
       STATE.syncBusy = false;
     }
 
-    STATE.player = matched;
+    STATE.syncBusy = true;
+    render();
+    const roster = await sync.loadRoster();
+    STATE.syncBusy = false;
+
+    // Logged rather than swallowed, so the next time somebody cannot
+    // get in it can be read off their phone instead of guessed at.
+    console.info(
+      `[ledger] roster: ${roster.players.length} from ${roster.source}`
+      + `${roster.empty ? ' (sheet tab is empty)' : ''}`
+      + `${roster.error ? ` — ${roster.error.message}` : ''}`
+    );
+
+    const found = store.lookupPlayer(typed);
+
+    if (found.status === 'inactive') {
+      STATE.error = 'This account is inactive. Ask Chris to switch it back on.';
+      return render();
+    }
+
+    if (found.status !== 'ok') {
+      // An unknown name means different things depending on how fresh
+      // the list is, and saying so is the difference between somebody
+      // waiting for Chris and somebody walking outside for signal.
+      // Keyed on an actual failed read rather than on the source, so a
+      // device with no sheet at all is not told it lost a connection
+      // it never had.
+      STATE.error = roster.error
+        ? 'Could not reach the player list, so this is the last one this phone saw. Check your connection and try again.'
+        : `${typed.trim()} is not on the roster yet. Ask Chris to add you.`;
+      return render();
+    }
+
+    STATE.player = found.player;
     STATE.loginDraft = '';
     STATE.passDraft = '';
-    store.setPlayer(matched);
+    store.setPlayer(found.player);
     loadActiveRound();
     go(activeScreen());
     sync.clearSetupParam();
@@ -3795,13 +3905,65 @@ const ACTIONS = {
     sync.syncInBackground(null, { force: true });
   },
 
-  'save-roster': () => {
-    const box = document.getElementById('rosterBox');
-    if (!box) return;
-    const names = box.value.split('\n');
-    store.setRoster(names);
-    go('settings', { notice: `Names saved: ${store.getRoster().join(', ')}.` });
+  /* --- Roster ---------------------------------------------------- */
+
+  'refresh-roster': () => runSync('Roster refresh', async () => {
+    const roster = await sync.loadRoster();
+    console.info(`[ledger] roster: ${roster.players.length} from ${roster.source}`);
+    if (roster.error) throw roster.error;
+    if (roster.empty) return 'Reached the sheet, but the players tab is still empty.';
+    return `${roster.players.length} name${roster.players.length === 1 ? '' : 's'} on the sheet.`;
+  }),
+
+  'add-player': () => {
+    const name = prompt('Name of the player, spelled the way they should see it');
+    if (!name || !name.trim()) return;
+    const clean = name.trim();
+
+    const existing = store.getPlayers();
+    if (existing.some((p) => p.player.toLowerCase() === clean.toLowerCase())) {
+      STATE.error = `${clean} is already on the list.`;
+      return render();
+    }
+
+    runSync('Adding a player', async () => {
+      await sync.pushPlayers([{ player: clean, active: true }]);
+      // Read back rather than assuming, so what shows is what the
+      // sheet actually holds — including anyone typed in by hand.
+      const roster = await sync.loadRoster();
+      return `${clean} added. ${roster.players.length} on the roster.`;
+    });
   },
+
+  'toggle-player': (el) => {
+    const name = el.getAttribute('data-name');
+    const found = store.getPlayers().find((p) => p.player === name);
+    if (!found) return;
+    const next = found.active === false;
+
+    if (!next && name === STATE.player
+      && !confirm(`Turn off ${name}? That is you — you will not be able to sign in again until somebody turns it back on.`)) return;
+
+    runSync('Updating the roster', async () => {
+      await sync.pushPlayers([{ player: name, active: next }]);
+      await sync.loadRoster();
+      return `${name} is now ${next ? 'active' : 'inactive'}.`;
+    });
+  },
+
+  /**
+   * Seed the sheet from whatever this device knows.
+   *
+   * Only offered while the tab is empty. It is the one-tap version of
+   * typing four names in by hand, and it exists so the changeover does
+   * not start with everybody locked out of a list nobody has filled in.
+   */
+  'publish-roster': () => runSync('Publishing the roster', async () => {
+    const names = store.getRoster();
+    await sync.pushPlayers(names.map((player) => ({ player, active: true })));
+    const roster = await sync.loadRoster();
+    return `Published ${roster.players.length}: ${roster.players.map((p) => p.player).join(', ')}.`;
+  }),
 
   'load-seeds': () => {
     const pending = missingSeeds(listCourses());

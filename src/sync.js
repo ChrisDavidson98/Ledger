@@ -32,7 +32,7 @@ const LAST_PULL_KEY = 'ledger:last_pull';
  * changes, and raise MIN_CLIENT in Code.gs when an older shape stops
  * being safe to accept.
  */
-export const CLIENT_CONTRACT = 7;
+export const CLIENT_CONTRACT = 8;
 
 /* --- Config ------------------------------------------------------ */
 
@@ -541,6 +541,73 @@ export async function pullRounds({ full = false } = {}) {
   return { added, seen: (data.rounds || []).length };
 }
 
+/* --- Players -------------------------------------------------------
+   The roster is the one thing that has to be right BEFORE anybody is
+   let in, which makes it the only read the gate waits on.
+-------------------------------------------------------------------- */
+
+export async function pullPlayers() {
+  const data = await post('pullPlayers', {}, { timeout: 15000 });
+  return (data.players || [])
+    .map((row) => ({
+      player: String(row.player || '').trim(),
+      active: row.active !== false,
+      createdAt: row.created_at ? String(row.created_at) : '',
+      updatedAt: row.updated_at ? String(row.updated_at) : '',
+    }))
+    .filter((p) => p.player);
+}
+
+export async function pushPlayers(players) {
+  if (!players.length) return { pushed: 0 };
+  await post('pushPlayers', {
+    players: players.map((p) => ({ player: p.player, active: p.active !== false })),
+  });
+  return { pushed: players.length };
+}
+
+/**
+ * The roster, network first with a fall back to the last one seen.
+ *
+ * Network first because the whole point is that a name added five
+ * minutes ago works immediately — a cached roster is exactly the bug
+ * this replaced. Cache second because the alternative is that a
+ * clubhouse with no bars locks out somebody who has been playing for
+ * a year, and being unable to reach the sheet is not a good reason to
+ * refuse a golfer their own app.
+ *
+ * `source` is reported rather than hidden, because it changes what
+ * the gate should say when a name does not match: an unknown name
+ * against a fresh list means "you are not on it", and against a stale
+ * one means "this phone could not check".
+ */
+export async function loadRoster() {
+  const cached = store.getPlayers();
+
+  if (!isConfigured()) {
+    // No sheet on this device at all, so there is nothing to be stale
+    // against — the local list is the only list there is.
+    return { players: cached, source: cached.length ? 'cache' : 'local' };
+  }
+
+  try {
+    const players = await pullPlayers();
+    if (players.length) {
+      store.setPlayers(players, 'network');
+      return { players, source: 'network' };
+    }
+    // Reached the sheet, but nobody has been added to the tab yet.
+    // Not an error, and emphatically not a reason to lock the door.
+    return { players: cached, source: cached.length ? 'cache' : 'local', empty: true };
+  } catch (err) {
+    return {
+      players: cached,
+      source: cached.length ? 'cache' : 'local',
+      error: err,
+    };
+  }
+}
+
 /* --- Tee times ---------------------------------------------------
    Simpler than rounds, because a tee time is small and flat: one row,
    no child rows, and deletion is a `deleted_at` stamp on the row
@@ -659,6 +726,16 @@ export async function syncAll() {
     result.teeTimes = (await pullTeeTimes()).added;
   } catch (err) {
     result.errors.push('Calendar failed: ' + err.message);
+  }
+
+  // Refreshing the roster on every sync means somebody added while
+  // you were mid-round is already there when you go to invite them,
+  // rather than only after the next sign-in.
+  try {
+    const roster = await loadRoster();
+    result.players = roster.players.length;
+  } catch (err) {
+    result.errors.push('Roster failed: ' + err.message);
   }
 
   return result;

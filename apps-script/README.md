@@ -6,7 +6,7 @@ else just pastes the same URL and secret into the app's Settings screen.
 ## 1. Make the spreadsheet
 
 Create a new Google Sheet. Name it something like **Ledger Data**. Leave the
-default tab alone — the script creates `rounds`, `shots`, `courses` and
+default tab alone — the script creates `rounds`, `shots`, `courses`, `players` and
 `tee_times` itself.
 
 ## 2. Add the script
@@ -62,6 +62,22 @@ totals. Entirely derived from `shots` — handy for charts, not authoritative.
 
 **`courses`** is one row per hole per tee set.
 
+**`players`** is who is allowed to sign in — **the one to know about**, because
+it is the only tab you are ever expected to edit by hand.
+
+To add somebody: type their name in the first column of a new row and leave
+everything else blank. That is the whole procedure. No redeploy, no code change,
+and no need to touch each phone. `active` is read as TRUE when empty, so a bare
+name works; set it to `FALSE` to block someone at the gate while leaving every
+round they logged exactly where it is.
+
+The app writes this tab too, from **Settings → Who can sign in**, and its writes
+only ever touch the rows they name — so a player you typed in by hand is never
+clobbered by a phone that had not synced.
+
+This used to be a list in each phone's own storage, which is why a new player
+could not get in: adding him on your phone did precisely nothing on his.
+
 **`tee_times`** is one row per scheduled round or practice session. `date` and
 `time` are held as plain **text**, not as date values — a tee time is "the 14th
 at 8:40", not an instant, and letting Sheets parse it attaches a timezone nobody
@@ -110,3 +126,5 @@ limits are in the tens of thousands per day.
 | Changes to `Code.gs` do nothing | Apps Script serves the last *deployed* version. **Deploy → Manage deployments → Edit → New version**. |
 | `This copy of Ledger is older than the sheet expects` | That phone is running a cached build older than `MIN_CLIENT`. Close the app fully and reopen it. Nothing was written, and its rounds are still safe on the device. |
 | A tee time on the wrong day for one person | The `date` column on `tee_times` has been turned back into a date value — most often by editing it by hand. Reformat the column as plain text; **Create Tabs** does it too. |
+| A new player is told they are not on the roster | Their name is not in the `players` tab, or is there with `active` set to FALSE. Add the row, then have them try again — no reload needed, the gate reads it fresh every time. |
+| A new player is told the player list could not be reached | Their phone got no answer from the sheet, so it fell back to the last roster it saw — on a brand-new phone, that is the three built-in names. Almost always signal, or a passphrase that has not been accepted yet. |
