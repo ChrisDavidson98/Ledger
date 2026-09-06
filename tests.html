@@ -36,6 +36,8 @@ import * as C from './src/courses.js';
 import * as I from './src/import.js';
 import * as H from './src/handicap.js';
 import * as E from './src/brief.js';
+import * as SCH from './src/schedule.js';
+import * as CH from './src/charts.js';
 import { SEED_COURSES } from './src/seed.js';
 
 const results = [];
@@ -78,6 +80,38 @@ function roundOf(holes, mode = 'full') {
     if (h.score != null) { r.holes[i].score = h.score; r.holes[i].done = true; }
   });
   return r;
+}
+
+/**
+ * A four-hole fixture that touches every category — a drive, an
+ * approach, a chip and putts — played at somewhere near a mid
+ * handicap standard. Used wherever a test needs a round that is
+ * plausible rather than one that proves a specific edge.
+ */
+function mediumRound() {
+  return roundOf([
+    { par: 4, yards: 395, shots: [
+      shot('tee', 395, 'fairway', 155, { miss: 'target' }),
+      shot('fairway', 155, 'green', 32, { miss: 'short', club: '7i' }),
+      shot('green', 32, 'green', 3),
+      shot('green', 3, null, null, { holed: true })] },
+    { par: 4, yards: 380, shots: [
+      shot('tee', 380, 'rough', 160, { miss: 'left' }),
+      shot('rough', 160, 'rough', 16, { miss: 'short' }),
+      shot('rough', 16, 'green', 9),
+      shot('green', 9, 'green', 2),
+      shot('green', 2, null, null, { holed: true })] },
+    { par: 3, yards: 165, shots: [
+      shot('tee', 165, 'green', 28, { miss: 'long' }),
+      shot('green', 28, 'green', 4),
+      shot('green', 4, null, null, { holed: true })] },
+    { par: 5, yards: 510, shots: [
+      shot('tee', 510, 'fairway', 265, { miss: 'target' }),
+      shot('fairway', 265, 'fairway', 95, { club: '5W' }),
+      shot('fairway', 95, 'green', 26, { miss: 'target', club: 'PW' }),
+      shot('green', 26, 'green', 3),
+      shot('green', 3, null, null, { holed: true })] },
+  ]);
 }
 
 /* --- Baseline --------------------------------------------------- */
@@ -681,6 +715,439 @@ check('file names say which round they are', () => {
   round.player = 'Chris';
   return eq(E.roundFilename(round, 'md'),
     'ledger-2026-08-12-gardner-municipal-chris.md', 'file name');
+});
+
+/* --- Benchmarks -------------------------------------------------
+   The family of handicap-level baselines is CONSTRUCTED, not
+   measured, so these are the checks that keep the construction
+   honest. If someone touches the shape constants in baseline.js,
+   this is the group that says whether they got away with it.
+------------------------------------------------------------------ */
+
+suite('Benchmarks');
+
+/* The positions a plain par 72 passes through: four par 3s, ten par
+   4s, four par 5s, played to roughly a mid-handicap standard. Written
+   as raw geometry rather than a round, because the shape depends only
+   on where the ball was and nothing else. */
+function canonicalPositions() {
+  const ott = [];
+  for (let i = 0; i < 10; i++) ott.push(['tee', 385, i < 6 ? 'fairway' : 'rough', 155]);
+  for (let i = 0; i < 4; i++) ott.push(['tee', 515, i < 2 ? 'fairway' : 'rough', 265]);
+
+  const app = [];
+  for (let i = 0; i < 4; i++) app.push(['tee', 165, i < 2 ? 'green' : 'rough', i < 2 ? 30 : 18]);
+  for (let i = 0; i < 10; i++) app.push([i < 6 ? 'fairway' : 'rough', 155, i < 6 ? 'green' : 'rough', i < 6 ? 34 : 16]);
+  for (let i = 0; i < 4; i++) app.push([i < 2 ? 'fairway' : 'rough', 265, 'fairway', 95]);
+  for (let i = 0; i < 4; i++) app.push(['fairway', 95, i < 3 ? 'green' : 'rough', i < 3 ? 26 : 14]);
+
+  const arg = [];
+  for (let i = 0; i < 7; i++) arg.push([i < 5 ? 'rough' : 'sand', i < 5 ? 16 : 12, 'green', 9]);
+
+  const putt = [];
+  [30, 34, 26, 30, 34, 26, 28, 32, 24, 22, 9, 9, 9, 9, 9, 9, 9, 14]
+    .forEach((d) => putt.push(['green', d, 'green', 3]));
+  for (let i = 0; i < 14; i++) putt.push(['green', 3, null, null]);
+
+  return { ott, app, arg, putt };
+}
+
+/* Shape delta over a set of shots: what the baseline moves by when
+   the level changes. Zero at the finish when the ball was holed. */
+const phiOf = (shots) => shots.reduce(
+  (sum, [sl, sd, el, ed]) => sum + B.gapShape(sl, sd) - (el ? B.gapShape(el, ed) : 0), 0
+);
+
+check('a full round of tee shots is worth one whole gap', () => {
+  // THE calibration constant. Everything else is a share of this.
+  const tees = [385, 385, 385, 385, 385, 385, 385, 385, 385, 385,
+    515, 515, 515, 515, 165, 165, 165, 165];
+  const sum = tees.reduce((s, d) => s + B.gapShape('tee', d), 0);
+  return near(sum, 1, 0.06) ? null : `tee row sums to ${sum.toFixed(3)}, expected about 1`;
+});
+
+check('the shape telescopes: the categories add back up to the tees', () => {
+  // Every shot's finish is the next one's start, so the middle terms
+  // cancel and only the tee is left. This is what makes total strokes
+  // gained against level h equal "what an h would take, minus yours".
+  const p = canonicalPositions();
+  const total = phiOf(p.ott) + phiOf(p.app) + phiOf(p.arg) + phiOf(p.putt);
+  const tees = [385, 385, 385, 385, 385, 385, 385, 385, 385, 385,
+    515, 515, 515, 515, 165, 165, 165, 165]
+    .reduce((s, d) => s + B.gapShape('tee', d), 0);
+  return near(total, tees, 0.02) ? null
+    : `categories sum to ${total.toFixed(3)}, tees to ${tees.toFixed(3)}`;
+});
+
+check('the gap divides between categories roughly as the model says', () => {
+  const p = canonicalPositions();
+  const phi = { ott: phiOf(p.ott), app: phiOf(p.app), arg: phiOf(p.arg), putt: phiOf(p.putt) };
+  const total = phi.ott + phi.app + phi.arg + phi.putt;
+  // The same shares handicap.js splits the gap by. Within a few points
+  // is the most that can be asked of a shape built this way — but a
+  // long way outside means the constants have drifted.
+  const want = { ott: 0.24, app: 0.43, arg: 0.16, putt: 0.17 };
+  const off = Object.keys(want)
+    .map((c) => ({ c, got: phi[c] / total, want: want[c] }))
+    .filter((r) => Math.abs(r.got - r.want) > 0.05);
+  return off.length ? off.map((r) => `${r.c} ${r.got.toFixed(2)} vs ${r.want}`).join(', ') : null;
+});
+
+check('a level costs exactly the strokes its handicap is expected to lose', () => {
+  const r = mediumRound();
+  const problems = [];
+  [0, 5, 10, 15, 20].forEach((h) => {
+    const key = h === 0 ? 'scratch' : 'hcp' + h;
+    const shift = M.roundTotals(r, key).total - M.roundTotals(r, 'tour').total;
+    // Scaled by how much of a full round this fixture is, since the
+    // gap is defined per eighteen holes.
+    const scale = M.playedHoles(r).length / 18;
+    const want = B.gapForHandicap(h) * scale;
+    if (Math.abs(shift - want) > Math.max(0.25, want * 0.15)) {
+      problems.push(`${key}: moved ${shift.toFixed(2)}, expected about ${want.toFixed(2)}`);
+    }
+  });
+  return problems.length ? problems.join('; ') : null;
+});
+
+check('every level is harder than the one below it, everywhere', () => {
+  const spots = [['tee', 400], ['tee', 150], ['fairway', 150], ['fairway', 20],
+    ['rough', 90], ['sand', 40], ['recovery', 120], ['green', 30], ['green', 3]];
+  for (const [lie, dist] of spots) {
+    let previous = -Infinity;
+    for (const h of ['tour', 'scratch', 'hcp5', 'hcp10', 'hcp15', 'hcp20']) {
+      const value = B.expectedStrokes(lie, dist, h);
+      if (value < previous) return `${lie} ${dist} goes backwards at ${h}`;
+      previous = value;
+    }
+  }
+  return null;
+});
+
+check('an unknown benchmark falls back to tour rather than misreporting', () => {
+  const stale = B.expectedStrokes('fairway', 150, 'hcp99_removed_later');
+  return near(stale, B.expectedStrokes('fairway', 150, 'tour'))
+    ? null : `got ${stale}`;
+});
+
+check('nothing derived is written back when the benchmark changes', () => {
+  // The whole benchmark design rests on this: raw shots are the
+  // record, and a benchmark is only how they are read.
+  const r = mediumRound();
+  const before = JSON.stringify(r);
+  M.roundTotals(r, 'hcp20');
+  M.approachBuckets([r], 'hcp15');
+  M.trendSeries([r], 'hcp10');
+  return JSON.stringify(r) === before ? null : 'computing strokes gained mutated the round';
+});
+
+/* --- Implied handicap --------------------------------------------- */
+
+suite('Implied handicap');
+
+check('the overall figure agrees with the scoring-anchored model', () => {
+  // The category split is new; the total must not drift from what the
+  // app already said, or two screens would disagree about one golfer.
+  const r = mediumRound();
+  const holes = M.playedHoles(r).length;
+  const per18 = (M.roundTotals(r, 'tour').total / holes) * 18;
+  const solved = H.impliedHandicaps([r]).overall.handicap;
+  const anchored = H.handicapForTotal(per18);
+  return Math.abs(solved - anchored) < 1.5
+    ? null : `solved ${solved.toFixed(1)}, anchored ${anchored.toFixed(1)}`;
+});
+
+check('a thin category is flagged rather than quietly reported', () => {
+  const result = H.impliedHandicaps([mediumRound()]);
+  const arg = result.rows.find((row) => row.category === 'arg');
+  if (!arg) return 'no short game row';
+  if (arg.shots >= H.MIN_CATEGORY_SHOTS) return 'fixture got too big to test thinness';
+  return arg.thin ? null : 'a two-shot sample was not marked thin';
+});
+
+check('play better than the tables cover and it says so', () => {
+  // Holing out from everywhere is better than scratch by a distance.
+  // Reporting "scratch" would understate it and extrapolating would
+  // invent precision the family does not have.
+  const r = roundOf([
+    { par: 4, yards: 380, shots: [shot('tee', 380, null, null, { holed: true })] },
+    { par: 4, yards: 400, shots: [shot('tee', 400, null, null, { holed: true })] },
+  ]);
+  const row = H.impliedHandicaps([r]).rows.find((x) => x.category === 'ott');
+  if (!row.belowRange) return 'a hole-in-one round did not read as below the range';
+  return H.fmtImplied(row) === 'better than scratch' ? null : H.fmtImplied(row);
+});
+
+check('a category with nothing in it solves to nothing, not to zero', () => {
+  const r = roundOf([
+    { par: 3, yards: 150, shots: [
+      shot('tee', 150, 'green', 12), shot('green', 12, null, null, { holed: true })] },
+  ]);
+  const ott = H.impliedHandicaps([r]).rows.find((x) => x.category === 'ott');
+  return ott.handicap === null ? null : `got ${ott.handicap}, expected null`;
+});
+
+check('the rolling window only looks at the rounds it says it does', () => {
+  const rounds = [];
+  for (let i = 0; i < 8; i++) {
+    const r = mediumRound();
+    r.id = 'r' + i;
+    r.date = new Date(2026, 0, 1 + i).toISOString();
+    rounds.push(r);
+  }
+  const result = H.rollingImplied(rounds, { window: 3 });
+  return eq(result.rounds, 3, 'rounds in window');
+});
+
+check('score-only rounds contribute nothing to it', () => {
+  const scoreOnly = roundOf([{ par: 4, yards: 400, score: 6 }], 'score');
+  const withShots = mediumRound();
+  const a = H.impliedHandicaps([withShots]);
+  const b = H.impliedHandicaps([withShots, scoreOnly]);
+  return eq(b.shots, a.shots, 'shot count');
+});
+
+/* --- Charts -------------------------------------------------------- */
+
+suite('Charts');
+
+check('the rolling mean is trailing, not centred', () => {
+  // A centred window would let a round played later move the point
+  // drawn for a round played earlier, which is not what a form line
+  // is for.
+  const mean = CH.rollingMean([0, 0, 0, 12], 4);
+  return near(mean[0], 0, 0.001) && near(mean[3], 3, 0.001)
+    ? null : `got ${mean.join(', ')}`;
+});
+
+check('it averages over what it has rather than dropping the start', () => {
+  const mean = CH.rollingMean([4, 8], 5);
+  return near(mean[0], 4) && near(mean[1], 6) ? null : `got ${mean.join(', ')}`;
+});
+
+check('the category chart draws a bar per category and survives zeroes', () => {
+  const svg = CH.sgByCategoryChart({ ott: 0, app: 0, arg: 0, putt: 0, total: 0 });
+  if (!/<svg/.test(svg)) return 'no svg';
+  if (svg.includes('NaN')) return 'NaN reached the markup';
+  const labels = B.CATEGORIES.filter((c) => svg.includes(B.CATEGORY_SHORT[c]));
+  return eq(labels.length, 4, 'categories drawn');
+});
+
+check('an empty approach chart is nothing at all, not an empty frame', () => {
+  return eq(CH.approachByDistanceChart([]), '', 'markup');
+});
+
+/* --- Scheduling ---------------------------------------------------- */
+
+suite('Scheduling');
+
+check('a day is the day it was booked on, whatever the timezone', () => {
+  // new Date('2026-03-14') parses as UTC and lands on the 13th for
+  // anyone west of Greenwich. This is the bug that would put a
+  // Saturday tee time on Friday night.
+  const back = SCH.dateKey(SCH.parseDateKey('2026-03-14'));
+  return eq(back, '2026-03-14', 'round trip');
+});
+
+check('a bad date is rejected rather than silently corrected', () => {
+  const bad = ['2026-02-30', '2026-13-01', 'tomorrow', '', '2026-3-14'];
+  const wrong = bad.filter((k) => SCH.isValidDateKey(k));
+  return wrong.length ? `accepted ${wrong.join(', ')}` : null;
+});
+
+check('a time is either a real one or blank', () => {
+  if (!SCH.isValidTime('')) return 'blank should be allowed — it means TBD';
+  if (!SCH.isValidTime('07:15')) return 'rejected a valid time';
+  if (SCH.isValidTime('25:00') || SCH.isValidTime('7:5')) return 'accepted a bad time';
+  return null;
+});
+
+check('the owner is on the card once, never twice', () => {
+  const tt = SCH.newTeeTime({
+    owner: 'Chris', invitees: ['Kaden', 'chris', 'Kaden', ' Manny '], date: '2026-05-01',
+  });
+  return eq(SCH.playersOf(tt).join(','), 'Chris,Kaden,Manny', 'players');
+});
+
+check('a tee time is visible to the owner and the invited, and nobody else', () => {
+  const tt = SCH.newTeeTime({ owner: 'Chris', invitees: ['Kaden'], date: '2026-05-01' });
+  if (!SCH.visibleTo(tt, 'Chris')) return 'owner cannot see it';
+  if (!SCH.visibleTo(tt, 'kaden')) return 'invitee cannot see it (case)';
+  if (SCH.visibleTo(tt, 'Manny')) return 'a stranger can see it';
+  return null;
+});
+
+check('a deleted tee time is visible to nobody', () => {
+  const tt = SCH.newTeeTime({ owner: 'Chris', invitees: [], date: '2026-05-01' });
+  tt.deletedAt = new Date().toISOString();
+  return SCH.visibleTo(tt, 'Chris') ? 'a tombstone still showed up' : null;
+});
+
+check('every tee time carries a group id from the moment it exists', () => {
+  // Generated at creation, not at tee-off, so everyone invited stamps
+  // the same one without having to agree on it over the internet.
+  const tt = SCH.newTeeTime({ owner: 'Chris', invitees: ['Kaden'], date: '2026-05-01' });
+  return tt.groupId ? null : 'no group id';
+});
+
+check('a tee time survives the sheet round trip', () => {
+  const tt = SCH.newTeeTime({
+    owner: 'Chris', invitees: ['Kaden', 'Manny'], date: '2026-05-01', time: '08:40',
+    courseId: 'c1', courseName: 'Gardner', teeName: 'Blue', layoutKey: 'k:x', holes: 18,
+    kind: 'round', notes: 'Bring balls, and a coat',
+  });
+  const back = SCH.rebuildTeeTime(SCH.flattenTeeTime(tt));
+  const fields = ['id', 'owner', 'date', 'time', 'courseId', 'courseName', 'teeName',
+    'layoutKey', 'holes', 'kind', 'notes', 'groupId', 'status'];
+  const changed = fields.filter((f) => String(back[f]) !== String(tt[f]));
+  if (changed.length) return `lost ${changed.join(', ')}`;
+  return eq(back.invitees.join(','), 'Kaden,Manny', 'invitees');
+});
+
+check('a day that came back from Sheets as a Date still lands on that day', () => {
+  const row = SCH.flattenTeeTime(SCH.newTeeTime({ owner: 'Chris', date: '2026-05-01', time: '08:40' }));
+  row.date = new Date(2026, 4, 1, 12, 0);
+  row.time = new Date(1899, 11, 30, 8, 40);
+  const back = SCH.rebuildTeeTime(row);
+  if (back.date !== '2026-05-01') return `date came back as ${back.date}`;
+  return eq(back.time, '08:40', 'time');
+});
+
+check('the month grid is always six weeks, so the page never reflows', () => {
+  const problems = [];
+  [[2026, 0], [2026, 1], [2026, 7], [2027, 11]].forEach(([y, m]) => {
+    const weeks = SCH.monthGrid(y, m);
+    if (weeks.length !== 6) problems.push(`${y}-${m + 1} had ${weeks.length} weeks`);
+    if (weeks.some((w) => w.length !== 7)) problems.push(`${y}-${m + 1} had a short week`);
+    const inMonth = weeks.flat().filter((d) => d.inMonth).length;
+    const expected = new Date(y, m + 1, 0).getDate();
+    if (inMonth !== expected) problems.push(`${y}-${m + 1} showed ${inMonth} of ${expected} days`);
+  });
+  return problems.length ? problems.join('; ') : null;
+});
+
+check('the calendar indexes rounds by the local day they were played', () => {
+  const r = mediumRound();
+  r.date = new Date(2026, 4, 1, 22, 30).toISOString();
+  const index = SCH.calendarIndex([], [r]);
+  return index.has('2026-05-01') ? null : `indexed under ${[...index.keys()].join(',')}`;
+});
+
+check('a calendar file names one event per tee time and reuses its id', () => {
+  const a = SCH.newTeeTime({ owner: 'Chris', date: '2026-05-01', time: '08:40', courseName: 'Gardner' });
+  const b = SCH.newTeeTime({ owner: 'Chris', date: '2026-05-08', kind: 'practice', practiceType: 'Range' });
+  const ics = SCH.toICS([a, b]);
+  if ((ics.match(/BEGIN:VEVENT/g) || []).length !== 2) return 'wrong number of events';
+  if (!ics.includes(`UID:${a.id}@ledger`)) return 'uid is not the tee time id';
+  if (!ics.includes('SUMMARY:Golf')) return 'a round is not named as golf';
+  if (!ics.includes('SUMMARY:Range')) return 'practice is not named by its type';
+  if (!ics.includes('TRIGGER:-PT60M')) return 'no alarm';
+  return null;
+});
+
+check('a tee time with no time yet exports as an all-day entry', () => {
+  const tt = SCH.newTeeTime({ owner: 'Chris', date: '2026-05-01', courseName: 'Gardner' });
+  const ics = SCH.toICS([tt]);
+  return ics.includes('DTSTART;VALUE=DATE:20260501') ? null : 'not an all-day event';
+});
+
+check('a nine blocks out less of the day than an eighteen', () => {
+  const nine = SCH.durationMinutes({ kind: 'round', holes: 9 });
+  const full = SCH.durationMinutes({ kind: 'round', holes: 18 });
+  const practice = SCH.durationMinutes({ kind: 'practice' });
+  if (!(practice < nine && nine < full)) return `${practice}/${nine}/${full}`;
+  // A tee time booked before a layout was chosen should assume a full
+  // round rather than under-booking the calendar.
+  return eq(SCH.durationMinutes({ kind: 'round', holes: null }), full, 'unknown length');
+});
+
+check('calendar text is escaped so a comma cannot break the file', () => {
+  const tt = SCH.newTeeTime({
+    owner: 'Chris', date: '2026-05-01', time: '08:40',
+    courseName: 'Hills, The', notes: 'Bring: balls; tees',
+  });
+  const ics = SCH.toICS([tt]);
+  if (!ics.includes('Hills\\, The')) return 'comma not escaped';
+  if (!ics.includes('tees') || !/\\;/.test(ics)) return 'semicolon not escaped';
+  return null;
+});
+
+check('no line in a calendar file exceeds the 75 octet limit', () => {
+  const tt = SCH.newTeeTime({
+    owner: 'Chris', date: '2026-05-01', time: '08:40',
+    courseName: 'A course with a truly excessive name that goes on and on and on',
+    notes: 'And a note that keeps going well past any reasonable length, twice over, '
+      + 'so that the folding logic is genuinely exercised rather than merely present.',
+  });
+  const long = SCH.toICS([tt]).split('\r\n').filter((l) => l.length > 75);
+  return long.length ? `${long.length} lines too long` : null;
+});
+
+/* --- Group rounds --------------------------------------------------- */
+
+suite('Group rounds');
+
+check('rounds played together join up by group id', () => {
+  const a = mediumRound(); a.id = 'ra'; a.player = 'Chris'; a.groupId = 'g1';
+  const b = mediumRound(); b.id = 'rb'; b.player = 'Kaden'; b.groupId = 'g1';
+  const c = mediumRound(); c.id = 'rc'; c.player = 'Manny'; c.groupId = 'g2';
+  const board = M.groupLeaderboard([a, b, c], 'g1');
+  if (board.length !== 2) return `${board.length} cards, expected 2`;
+  return board.every((row) => row.sg) ? null : 'a card lost its strokes gained';
+});
+
+check('a round with no group id joins nothing', () => {
+  // Every round logged before the calendar existed has none, and they
+  // must not all silently become one enormous group.
+  const a = mediumRound(); a.id = 'ra'; a.groupId = null;
+  const b = mediumRound(); b.id = 'rb'; b.groupId = null;
+  return eq(M.roundsInGroup([a, b], null).length, 0, 'joined rounds');
+});
+
+check('a score-only card sits in the group with no strokes gained', () => {
+  const a = mediumRound(); a.id = 'ra'; a.player = 'Chris'; a.groupId = 'g1';
+  const b = roundOf([{ par: 4, yards: 400, score: 6 }], 'score');
+  b.id = 'rb'; b.player = 'Kaden'; b.groupId = 'g1';
+  const board = M.groupLeaderboard([a, b], 'g1');
+  const kaden = board.find((row) => row.player === 'Kaden');
+  if (!kaden) return 'the score-only card was dropped';
+  return kaden.sg === null ? null : 'a score-only card reported strokes gained';
+});
+
+check('a round carries its group id through the sheet', () => {
+  const r = mediumRound();
+  r.groupId = 'g_abc';
+  const back = tripped(r);
+  return eq(back.groupId, 'g_abc', 'group id');
+});
+
+check('a round with no group id comes back with none, not an empty string', () => {
+  const r = mediumRound();
+  const back = tripped(r);
+  return back.groupId === null ? null : `got ${JSON.stringify(back.groupId)}`;
+});
+
+check('a round logged before the calendar existed still works throughout', () => {
+  // Not merely groupId: null, but the property absent entirely, which
+  // is what every round already in the sheet actually looks like.
+  const old = mediumRound();
+  delete old.groupId;
+  old.schema = 3;
+
+  if (!near(M.roundTotals(old).total, M.roundTotals(mediumRound()).total)) {
+    return 'strokes gained changed';
+  }
+  if (M.roundsInGroup([old], 'g1').length) return 'it joined a group it is not in';
+  if (H.impliedHandicaps([old]).overall.handicap == null) return 'no implied handicap';
+
+  const flat = S.flattenRound(old);
+  if (flat.summary.group_id !== '') return `group_id written as ${JSON.stringify(flat.summary.group_id)}`;
+
+  // And the reverse: a sheet row from before the column existed.
+  const summary = { ...flat.summary };
+  delete summary.group_id;
+  const back = S.rebuildRound(summary, flat.shots);
+  return back.groupId === null ? null : `rebuilt as ${JSON.stringify(back.groupId)}`;
 });
 
 /* --- Render ----------------------------------------------------- */

@@ -335,15 +335,18 @@ label {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 600;
-  /* Five tabs have to fit a 320px phone, so the padding gives way
-     before the labels do. */
-  padding: 6px 4px;
+  /* Six tabs have to fit a 320px phone, so the padding gives way
+     before the labels do. Adding the diary was what took it from five
+     to six, and it is the reason Clubhouse is labelled Club. */
+  padding: 6px 2px;
   flex: 1 1 0;
   min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-@media (max-width: 360px) {
-  .navbtn { font-size: 10px; }
+@media (max-width: 380px) {
+  .navbtn { font-size: 10px; padding: 6px 1px; }
 }
 .navbtn.active { color: var(--flag); }
 .navbtn .dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
@@ -506,3 +509,115 @@ label {
 
 .split { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .stack > * + * { margin-top: 10px; }
+
+/* --- Calendar ----------------------------------------------------
+   A month at a glance, sized so a thumb can hit any day. Markers are
+   never colour alone: a scheduled round is a filled dot, practice is
+   a hollow ring, and a day already played is tinted and ticked. That
+   is three signals that survive both a colourblind reader and a phone
+   in bright sun, which on a golf course is most of them.
+------------------------------------------------------------------ */
+
+.cal-head {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+.cal-head span {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.cal-day {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 2px 0 4px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: none;
+  color: var(--ink);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  font-weight: 500;
+}
+.cal-day.muted-day { color: var(--ink-faint); opacity: 0.5; }
+.cal-day.today {
+  border-color: var(--flag);
+  font-weight: 700;
+}
+.cal-day.played { background: var(--cream); }
+.cal-day.has-events { border-color: var(--green-line); }
+.cal-day .marks {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  height: 7px;
+}
+.cal-day .mk {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.cal-day .mk.round { background: var(--green-mid); }
+.cal-day .mk.practice {
+  background: none;
+  border: 1.5px solid var(--green-mid);
+  opacity: 0.75;
+}
+.cal-day .mk.cancelled {
+  background: none;
+  border: 1.5px solid var(--ink-faint);
+  opacity: 0.6;
+}
+.cal-day .mk.done {
+  border-radius: 0;
+  background: none;
+  width: auto;
+  height: auto;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--green-mid);
+  font-weight: 700;
+}
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.cal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.cal-nav h2 { margin: 0; }
+.cal-nav button {
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 9px;
+  border: 1.5px solid var(--green-line);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 17px;
+}

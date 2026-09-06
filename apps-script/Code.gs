@@ -18,10 +18,32 @@
 var SECRET_PROPERTY = 'LEDGER_SECRET';
 
 var SHEETS = {
+  // group_id sits at the END, and every new column must. migrateHeaders
+  // re-maps by name so a reorder would survive, but the archive tabs
+  // below are built by concatenating onto this list, and the app reads
+  // these rows by header too — appending is the change with no way to
+  // go wrong. It is blank on every round logged before the calendar.
   rounds: [
     'round_id', 'player', 'date', 'finished_at', 'course_id', 'course_name',
     'tee_name', 'mode', 'holes_played', 'score', 'par', 'to_par',
     'sg_ott', 'sg_app', 'sg_arg', 'sg_putt', 'sg_total', 'updated_at',
+    'group_id',
+  ],
+  /*
+   * Scheduled tee times. Deletion is a `deleted_at` stamp in place
+   * rather than a move to an archive tab: a tee time holds no shots,
+   * so there is nothing to protect, but the tombstone still has to
+   * outlive the deletion long enough to reach the other phones.
+   *
+   * `date` and `time` are plain text, not dates. A tee time is "the
+   * 14th at 8:40", not an instant, and letting Sheets parse it into a
+   * timestamp would attach a timezone nobody chose.
+   */
+  tee_times: [
+    'tee_time_id', 'owner', 'invitees', 'date', 'time',
+    'course_id', 'course_name', 'tee_name', 'kind', 'practice_type',
+    'notes', 'group_id', 'status', 'created_at', 'updated_at', 'deleted_at',
+    'layout_key', 'holes',
   ],
   // A score-only round has no shots, so it writes one row per hole
   // with shot_num 0 carrying just the score. Without that its
@@ -60,15 +82,58 @@ SHEETS.shots_archive = SHEETS.shots.slice();
  * "that phone is pointed at an older deployment" is otherwise
  * invisible from the client.
  */
-var CONTRACT = 6;
+var CONTRACT = 7;
+
+/*
+ * The oldest client this deployment will accept WRITES from.
+ *
+ * A PWA is cached, so a phone left closed since before a schema
+ * change will run old code against a new sheet whenever it is next
+ * opened. Reads from such a client are harmless — it sees columns it
+ * ignores. Writes are not: it would push rows in the shape it still
+ * believes in, and those land as real data nobody notices is wrong.
+ *
+ * So writes carry the client's contract number and anything below
+ * this is refused with an error telling the person to reload, which
+ * is a far better outcome than a silently malformed row. Reads stay
+ * open, deliberately: an old phone that can still SEE everyone's
+ * rounds while it waits to be reloaded is much less alarming than one
+ * that appears to have lost them.
+ *
+ * Set to 0 today, which accepts everything — and that is correct, not
+ * an oversight. No client that exists writes a shape this sheet
+ * cannot take: the ones predating the calendar simply omit group_id,
+ * which the header remap fills in as blank, and blank is exactly what
+ * a round with no tee time behind it should have. Refusing them would
+ * mean redeploying the backend knocked every phone offline until each
+ * one happened to be reopened, which is a real harm traded for no
+ * protection at all.
+ *
+ * What this is, is armed. The version now travels with every write,
+ * so the day a write shape genuinely stops being safe, raising this
+ * number is the whole fix — and the phone that has not been reopened
+ * since gets told to reload instead of quietly writing a bad row.
+ *
+ * Note that clients predating the field send nothing, which reads as
+ * 0. Raising MIN_CLIENT above 0 therefore turns those away too, which
+ * is the intended behaviour but worth knowing before you do it.
+ */
+var MIN_CLIENT = 0;
+
+var WRITE_ACTIONS = {
+  pushRounds: true, deleteRounds: true, restoreRounds: true,
+  cleanup: true, pushCourses: true, pushTeeTimes: true,
+};
 
 function doGet(e) {
   return respond({
     ok: true,
     service: 'ledger',
     contract: CONTRACT,
+    minClient: MIN_CLIENT,
     actions: ['ping', 'setup', 'pushRounds', 'deleteRounds', 'listArchive',
-      'restoreRounds', 'cleanup', 'pullRounds', 'pushCourses', 'pullCourses'],
+      'restoreRounds', 'cleanup', 'pullRounds', 'pushCourses', 'pullCourses',
+      'pushTeeTimes', 'pullTeeTimes'],
   });
 }
 
@@ -82,6 +147,18 @@ function doPost(e) {
 
   if (!checkSecret(body.secret)) {
     return respond({ ok: false, error: 'Bad or missing secret.' });
+  }
+
+  // A client too old to write the current row shape is turned away
+  // before it can write anything, rather than after. Reads are never
+  // gated — see the note on MIN_CLIENT.
+  if (WRITE_ACTIONS[body.action] && Number(body.client || 0) < MIN_CLIENT) {
+    return respond({
+      ok: false,
+      error: 'This copy of Ledger is older than the sheet expects, so it has not '
+        + 'written anything. Close it completely and reopen it to pick up the '
+        + 'current version — your rounds are safe on this phone until you do.',
+    });
   }
 
   var lock = LockService.getScriptLock();
@@ -104,6 +181,8 @@ function doPost(e) {
       case 'pullRounds':   return respond(pullRounds(body.since || null));
       case 'pushCourses':  return respond(pushCourses(body.courses || []));
       case 'pullCourses':  return respond(pullCourses());
+      case 'pushTeeTimes': return respond(pushTeeTimes(body.teeTimes || []));
+      case 'pullTeeTimes': return respond(pullTeeTimes());
       default:
         return respond({ ok: false, error: 'Unknown action: ' + body.action });
     }
@@ -202,6 +281,7 @@ function migrateHeaders(sheet, name) {
 
 function setupSheets() {
   Object.keys(SHEETS).forEach(function (name) { sheetFor(name); });
+  textColumns('tee_times', ['date', 'time']);
   return { ok: true, sheets: Object.keys(SHEETS) };
 }
 
@@ -472,6 +552,85 @@ function pullRounds(since) {
   }
 
   return { ok: true, rounds: summaries, shots: shots, serverTime: new Date().toISOString() };
+}
+
+/* --- Tee times ---------------------------------------------------- */
+
+/**
+ * Upsert by tee_time_id, same replace-then-append shape as rounds.
+ *
+ * A deleted tee time arrives here as an ordinary row carrying a
+ * `deleted_at`, so nothing special happens to it — the tombstone is
+ * just another field, and it is what stops the entry reappearing on
+ * everyone else's calendar at the next pull.
+ *
+ * The day and the time columns are held as plain text; see
+ * textColumns() for why that matters more than it sounds like it does.
+ */
+function pushTeeTimes(teeTimes) {
+  if (!teeTimes.length) return { ok: true, written: 0 };
+
+  var ids = teeTimes.map(function (t) { return t.tee_time_id; });
+  var now = new Date().toISOString();
+
+  var rows = teeTimes.map(function (t) {
+    t.updated_at = t.updated_at || now;
+    return t;
+  });
+
+  textColumns('tee_times', ['date', 'time']);
+  replaceRows('tee_times', 'tee_time_id', ids, rows);
+  return { ok: true, written: rows.length };
+}
+
+/**
+ * Pin columns to plain text so Sheets stops interpreting them.
+ *
+ * Left to itself it parses "2026-09-14" into a date value and "08:40"
+ * into a time in 1899, then hands both back through the spreadsheet's
+ * timezone rather than the phone's. That is how a tee time booked for
+ * Saturday morning shows up on Friday night for one person in the
+ * group, and it is invisible until somebody misses a round over it.
+ */
+function textColumns(name, columns) {
+  var sheet = sheetFor(name);
+  var headers = SHEETS[name];
+  var rows = Math.max(sheet.getMaxRows() - 1, 1);
+  columns.forEach(function (column) {
+    var idx = headers.indexOf(column);
+    if (idx === -1) return;
+    sheet.getRange(2, idx + 1, rows, 1).setNumberFormat('@');
+  });
+}
+
+/**
+ * Every tee time, tombstones included.
+ *
+ * Deleted ones are NOT filtered out here. A phone that has not synced
+ * since before a deletion has to be told about it, and the only way
+ * to say "this is gone" over a pull is to hand back the row saying so.
+ * The app drops them on the way in.
+ */
+function pullTeeTimes() {
+  var zone = book().getSpreadsheetTimeZone();
+
+  var rows = readAll('tee_times').filter(function (row) {
+    return String(row.tee_time_id || '') !== '';
+  }).map(function (row) {
+    // A row written before the text format was applied, or typed into
+    // the sheet by hand, can still come back as a real Date. Format it
+    // to the day and time the sheet was SHOWING rather than letting
+    // the client re-parse a stringified Date and land a day out.
+    row.date = asText(row.date, zone, 'yyyy-MM-dd');
+    row.time = asText(row.time, zone, 'HH:mm');
+    return row;
+  });
+  return { ok: true, teeTimes: rows, serverTime: new Date().toISOString() };
+}
+
+function asText(value, zone, pattern) {
+  if (value instanceof Date) return Utilities.formatDate(value, zone, pattern);
+  return String(value == null ? '' : value).replace(/^'/, '');
 }
 
 /* --- Courses ----------------------------------------------------- */

@@ -27,15 +27,25 @@ export { unitForLie };
  * it has no shots, and inventing them from a score would quietly
  * corrupt the one number the app exists to produce.
  */
-export function newRound({ player, courseId, courseName, teeName, layout, holes, mode = 'full' }) {
+export function newRound({
+  player, courseId, courseName, teeName, layout, holes, mode = 'full', groupId = null,
+}) {
   return {
     id: 'r_' + Date.now().toString(36),
-    schema: 3,
+    schema: 4,
     player,
     courseId,
     courseName,
     teeName,
     layout: layout || null, // which nine or pairing was played
+    /*
+     * Set only when the round was started from a scheduled tee time.
+     * Rounds sharing one were played together, which is what makes a
+     * group leaderboard possible after the fact without anybody ever
+     * writing to anybody else's round. Blank on every round logged
+     * before the calendar existed, and nothing may assume it is set.
+     */
+    groupId: groupId || null,
     mode,
     date: new Date().toISOString(),
     finishedAt: null,
@@ -801,4 +811,43 @@ export function missTally(rounds, category, baseline = 'tour') {
     shortCount: ['short', 'short-left', 'short-right'].reduce((s, d) => s + (tally[d] || 0), 0),
     longCount: ['long', 'long-left', 'long-right'].reduce((s, d) => s + (tally[d] || 0), 0),
   };
+}
+
+/**
+ * Rounds played together, joined after the fact by the group id a
+ * scheduled tee time stamped on them.
+ *
+ * This is the only thing that makes a group result possible, and it
+ * is entirely a read-time operation. Nobody ever wrote to a shared
+ * record: each player's round arrived on the sheet on its own, from
+ * their own phone, whenever their signal came back.
+ */
+export function roundsInGroup(rounds, groupId) {
+  if (!groupId) return [];
+  return rounds
+    .filter((r) => r.groupId === groupId && playedHoles(r).length)
+    .sort((a, b) => roundToPar(a) - roundToPar(b));
+}
+
+/**
+ * The card for a group: everyone who logged a round against the same
+ * tee time, best score first.
+ *
+ * Holes played is carried because there is nothing stopping one
+ * player logging nine and another eighteen, and a leaderboard that
+ * quietly compared the two would be wrong rather than merely thin.
+ */
+export function groupLeaderboard(rounds, groupId, benchmark = 'tour') {
+  return roundsInGroup(rounds, groupId).map((round) => {
+    const holes = playedHoles(round).length;
+    return {
+      round,
+      player: round.player,
+      holes,
+      score: roundScore(round),
+      toPar: roundToPar(round),
+      scoreOnly: isScoreOnly(round),
+      sg: isScoreOnly(round) ? null : roundTotals(round, benchmark),
+    };
+  });
 }

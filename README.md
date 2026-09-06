@@ -31,10 +31,13 @@ only reads, so it cannot touch stored rounds or the sheet.
 
 Run it before pushing. It covers the strokes-gained maths, shot editing and
 relinking, the sync round trip for both round modes, course building, duplicate
-detection, import parsing, the records rules, club distances and gapping, the
-handicap model against the two real rounds it was calibrated on, and the export
-briefing — that the conventions are stated, that the numbers in the prose match
-the ones the model computes, and that the CSV shows its own working.
+detection, import parsing, the records rules, club distances and gapping, and
+the handicap model against the two real rounds it was calibrated on. It also
+covers the export briefing — that the conventions are stated, that the numbers
+in the prose match the ones the model computes, and that the CSV shows its own
+working — and the benchmark family's calibration and monotonicity, the
+implied-handicap solve and its thin-sample guards, tee times and their sheet
+round trip, the calendar grid, and the `.ics` export down to line folding.
 
 ## How it is put together
 
@@ -47,6 +50,8 @@ the ones the model computes, and that the CSV shows its own working.
 | `src/seed.js` | Scorecards transcribed from the paper cards |
 | `src/import.js` | Bringing a scorecard in from pasted text |
 | `src/handicap.js` | Turning strokes gained into a handicap level |
+| `src/schedule.js` | Tee times, the calendar grid, and calendar export |
+| `src/charts.js` | Inline SVG chart primitives |
 | `src/brief.js` | Writing a round out as a briefing or a shots CSV |
 | `src/sync.js` | Google Sheet sync — push, pull, delete, archive, setup links |
 | `src/app.js` | Screens, state, event wiring |
@@ -78,6 +83,19 @@ scoring, the trend and best-round, and is excluded from every strokes-gained
 figure. There is deliberately no middle tier — partial shot data is where
 statistics quietly go wrong.
 
+**Nobody ever writes to anybody else's record.** Playing together is a
+`group_id` stamped on each player's own round by the tee time they all started
+from. The group card is assembled on read, afterwards, from rounds that arrived
+separately. A live shared scorecard would need concurrent appends to one row
+over a sheet and a bad signal, which is the one thing this backend cannot be
+trusted to do — so the diary is deliberately a plan, and a round is the record.
+
+**A benchmark is how the data is read, never a change to it.** Strokes gained
+can be recomputed against a tour player or against a handicap level; only the
+tour table is measured data, and the rest are derived from it. The setting lives
+on the device, not on the round, so two people can look at the same card against
+different standards. Nothing recomputed is written back.
+
 ### Conventions worth knowing
 
 - Distances are in **yards for every lie except the green**, which is in feet.
@@ -107,6 +125,10 @@ distance, miss grids, and a hole-by-hole card that expands to every shot.
 **Stats** — the career view. Handicap level per part of the game with the upside
 of fixing the weakest, a trend line by round, the basics, club distributions and
 gapping, holes that cost you, and career bests.
+
+**Diary** — a month of what is booked and what has already been played. Tee
+times, invitees, calendar export, and on the morning of a round a button that
+starts it with the course already chosen.
 
 **Clubhouse** — everyone side by side, and the holes with a grudge.
 
@@ -185,6 +207,59 @@ the home screen *first*, then sign in.
 Manage deployments → pencil → New version**, which keeps the same URL. Creating
 a *new deployment* issues a different URL and strands every other phone.
 
-Bump `CONTRACT` when the actions or columns change. Column changes are safe:
-`migrateHeaders` re-maps existing rows by header name, so columns can be added
-or reordered without corrupting what is already stored.
+Bump `CONTRACT` when the actions or columns change, and `CLIENT_CONTRACT` in
+`src/sync.js` alongside it. Column changes are safe: `migrateHeaders` re-maps
+existing rows by header name, so columns can be added or reordered without
+corrupting what is already stored. Add new columns at the end anyway — the
+archive tabs are built by concatenating onto the live column lists.
+
+`MIN_CLIENT` is the oldest client the deployment accepts *writes* from. A PWA is
+cached, so a phone that has not been opened since before a schema change will
+run old code against the new sheet; reads from it are harmless, writes are not.
+Anything below `MIN_CLIENT` is refused with a message telling the person to
+reload, which is a much better outcome than a silently malformed row. Reads stay
+open on purpose — an old phone that can still see everyone's rounds while it
+waits to be reloaded is far less alarming than one that appears to have lost
+them.
+
+It sits at **0** today, which accepts everything, and that is deliberate. No
+client that exists writes a shape the sheet cannot take — the ones predating the
+calendar just omit `group_id`, which remaps to blank, which is what a round with
+no tee time behind it should have. Refusing them would mean redeploying the
+backend knocked every phone offline until somebody happened to reopen it: real
+harm, no protection. What matters is that the version now travels with every
+write, so on the day a write shape genuinely stops being safe, raising the
+number is the entire fix.
+
+## Benchmarks, and where the numbers come from
+
+Only the tour table in `baseline.js` is data. Every handicap level is that table
+plus a gap:
+
+```
+E_h(lie, dist) = E_tour(lie, dist) + gap(h) * shape(lie, dist)
+```
+
+`gap(h)` is the same `3.2 + 0.85h` the handicap model was already calibrated on
+against two real rounds — no new numbers. `shape` spreads that total over the
+positions a round passes through, and does not vary with `h`, so the levels are
+one family and are monotonic by construction.
+
+What makes it mean anything: summed over a hole the shape terms telescope, since
+every shot's finish is the next shot's start, leaving only the value at the tee.
+Total strokes gained against level `h` is therefore just *what an h handicap
+would take on these holes, minus what you took* — and calibrating the whole
+family reduces to making the tee row sum to `gap(h)` over eighteen holes.
+
+`tests.html` asserts exactly that, per category. If the shape constants are ever
+touched, that group of checks is the one that says whether the change survived.
+
+The same relation is what makes the per-category **implied handicap** a real
+solve rather than a lookup: strokes gained against level `h` is linear in `h`,
+so setting it to zero and solving says at what standard that part of your game
+would have come out level, given where your ball actually went. The total agrees
+with the scoring-anchored figure by construction; only the split between
+categories differs, and that is the point — it reflects your shots rather than
+golfers in general. Under about twenty shots in the window a category falls back
+to the fixed shares and is marked with a degree sign, so a modelled figure never
+passes as a measured one.

@@ -8,14 +8,15 @@
 --------------------------------------------------------------- */
 
 /* Bumped whenever SHELL changes, so activate clears the old copy. */
-const CACHE = 'ledger-v2';
+const CACHE = 'ledger-v3';
 
 /*
  * Every module app.js imports, because they are static imports: one
  * of them missing from the cache is not a degraded feature, it is a
- * blank screen on the 7th tee. The list had fallen behind the code —
- * four modules were only ever cached by having been fetched once,
- * which a phone opened offline for the first time never has.
+ * blank screen on the 7th tee. The list had fallen behind the code
+ * once already — modules that were only ever cached by having been
+ * fetched, which a phone opened offline for the first time never has.
+ * Anything added to app.js's imports belongs here the same day.
  */
 const SHELL = [
   './',
@@ -33,8 +34,9 @@ const SHELL = [
   './src/seed.js',
   './src/sync.js',
   './src/brief.js',
+  './src/schedule.js',
+  './src/charts.js',
 ];
-
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE)

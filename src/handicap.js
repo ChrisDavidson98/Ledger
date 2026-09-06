@@ -38,13 +38,13 @@
    recomputed from raw shots, every round already logged updates with it.
 --------------------------------------------------------------- */
 
-import { CATEGORIES } from './baseline.js';
+import { CATEGORIES, SCRATCH_GAP, PER_HANDICAP, gapShape } from './baseline.js';
+import { sgRounds, playedHoles, shotSG } from './model.js';
 
-/** Strokes behind tour average for a scratch golfer, per 18 holes. */
-const SCRATCH_GAP = 3.2;
-
-/** Additional strokes lost per point of handicap. */
-const PER_HANDICAP = 0.85;
+/* SCRATCH_GAP and PER_HANDICAP moved to baseline.js when benchmarks
+   arrived: the same two numbers now define the whole family of
+   handicap-level expected-strokes tables, so they belong where the
+   tables are. Nothing about them changed. */
 
 /**
  * How the gap divides between parts of the game. Approach is the
@@ -135,4 +135,179 @@ export function handicapProfile(sgPer18ByCategory) {
  */
 export function upsideFor(row) {
   return Math.max(0, row.expectedAtOverall - row.sg);
+}
+
+/* --- Implied handicap from actual shots --------------------------
+   Everything above splits the gap using SHARES — fixed proportions
+   that describe golfers in general. This does the same job from the
+   shots in front of it instead.
+
+   For one category, strokes gained against benchmark level h is
+
+       SG_h  =  SG_tour  +  gap(h) * PHI
+
+   where PHI is the sum, over that category's shots, of the baseline
+   shape at the start minus the shape at the finish. PHI depends only
+   on where the ball actually was, so it is a property of YOUR round
+   rather than of golfers on average. Setting SG_h to zero and solving
+   for h answers the question directly: at what standard would this
+   part of your game have been par for the course?
+
+   The relation is linear and PHI is positive for any real category,
+   so the solve is exact and needs no search. Both sides scale with
+   the number of holes, which cancels — nine holes and thirty-six
+   holes give the same answer, and nothing needs normalising per 18.
+
+   The total agrees with handicapForTotal by construction, because
+   PHI for the whole round telescopes down to the shape at the tees,
+   which is what the family was calibrated on. Only the split between
+   categories differs, and that is the point: it now reflects where
+   your ball went rather than where an average golfer's does.
+------------------------------------------------------------------ */
+
+
+/** Below roughly this many shots a category's figure is noise. */
+export const MIN_CATEGORY_SHOTS = 20;
+
+/** How many rounds the rolling figure looks back over by default. */
+export const DEFAULT_WINDOW = 10;
+
+/**
+ * Shape at a shot's finish. Zero when the ball was holed, which is
+ * what makes the terms telescope across a hole.
+ */
+function endShape(shot) {
+  return shot.holed ? 0 : gapShape(shot.endLie, shot.endDist);
+}
+
+/**
+ * Raw ingredients per category: strokes gained against tour, the
+ * shape delta, and how many shots went into each.
+ */
+export function impliedInputs(rounds) {
+  const acc = {};
+  CATEGORIES.forEach((c) => { acc[c] = { sgTour: 0, phi: 0, shots: 0 }; });
+  const total = { sgTour: 0, phi: 0, shots: 0 };
+
+  sgRounds(rounds).forEach((round) => {
+    playedHoles(round).forEach((hole) => {
+      hole.shots.forEach((shot) => {
+        const { category, sg } = shotSG(shot, hole.par, 'tour');
+        const delta = gapShape(shot.startLie, shot.startDist) - endShape(shot);
+        const bucket = acc[category];
+        if (!bucket) return;
+        bucket.sgTour += sg;
+        bucket.phi += delta;
+        bucket.shots += 1;
+        total.sgTour += sg;
+        total.phi += delta;
+        total.shots += 1;
+      });
+    });
+  });
+
+  return { byCategory: acc, total };
+}
+
+/**
+ * The handicap level at which this category's strokes gained would
+ * come out at zero. Null when there is not enough of a shape delta
+ * to divide by — a category made entirely of tap-ins, for instance.
+ */
+function solve({ sgTour, phi }) {
+  // Below this the divide is numerically meaningless, not merely
+  // uncertain, and would produce a wild number rather than a wide one.
+  if (!(phi > 0.02)) return null;
+  const gap = -sgTour / phi;
+  return (gap - SCRATCH_GAP) / PER_HANDICAP;
+}
+
+/**
+ * Implied handicap for every category and for the round as a whole.
+ *
+ * `raw` is the unclamped solve, kept so the caller can say "better
+ * than scratch" rather than silently reporting a 0 that is really a
+ * minus three. `thin` marks a category the window did not gather
+ * enough shots for — shown, but flagged, because hiding it entirely
+ * makes a weak short game look like no short game.
+ */
+export function impliedHandicaps(rounds, { minShots = MIN_CATEGORY_SHOTS } = {}) {
+  const { byCategory, total } = impliedInputs(rounds);
+
+  const row = (key, input) => {
+    const raw = solve(input);
+    return {
+      category: key,
+      shots: input.shots,
+      sgTour: input.sgTour,
+      raw,
+      handicap: raw == null ? null : clamp(raw),
+      // Past the best level the tables describe. Saying "scratch"
+      // there would understate it, and extrapolating would invent
+      // precision the family does not have.
+      belowRange: raw != null && raw < HANDICAP_RANGE.min,
+      aboveRange: raw != null && raw > HANDICAP_RANGE.max,
+      thin: input.shots < minShots,
+    };
+  };
+
+  const rows = CATEGORIES.map((c) => row(c, byCategory[c]));
+  const overall = row('total', total);
+
+  const ranked = rows.filter((r) => r.handicap != null && !r.thin);
+
+  return {
+    rows,
+    overall,
+    shots: total.shots,
+    rounds: sgRounds(rounds).filter((r) => playedHoles(r).length).length,
+    // Highest handicap is the weakest part of the game.
+    weakest: ranked.length
+      ? ranked.reduce((w, r) => (r.handicap > w.handicap ? r : w))
+      : null,
+    strongest: ranked.length
+      ? ranked.reduce((s, r) => (r.handicap < s.handicap ? r : s))
+      : null,
+  };
+}
+
+/**
+ * The same figure over the most recent rounds only. Form matters and
+ * a career average buries it — a year of improvement reads as a flat
+ * line if the first month is still in the average.
+ */
+export function rollingImplied(rounds, { window = DEFAULT_WINDOW, minShots = MIN_CATEGORY_SHOTS } = {}) {
+  const recent = sgRounds(rounds)
+    .filter((r) => playedHoles(r).length > 0)
+    .slice()
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, window);
+
+  const result = impliedHandicaps(recent, { minShots });
+  result.rounds = recent.length;
+  result.window = window;
+  return result;
+}
+
+/** "12", "better than scratch", or "—" when there was nothing to solve. */
+export function fmtImplied(row) {
+  if (!row || row.handicap == null) return '—';
+  if (row.belowRange) return 'better than scratch';
+  if (row.aboveRange) return `worse than ${HANDICAP_RANGE.max}`;
+  return fmtHandicap(row.handicap);
+}
+
+/**
+ * The same answer in a table column.
+ *
+ * Better than scratch is written the way a scorecard writes it — a
+ * plus handicap, so two shots better than scratch is "+2". That is
+ * the notation golfers already read, and it fits where "better than
+ * scratch" wraps onto three lines and stops being legible.
+ */
+export function fmtImpliedShort(row) {
+  if (!row || row.handicap == null) return '—';
+  if (row.belowRange) return '+' + Math.max(1, Math.round(-row.raw));
+  if (row.aboveRange) return `${HANDICAP_RANGE.max}+`;
+  return fmtHandicapShort(row.handicap);
 }

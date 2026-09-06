@@ -6,7 +6,8 @@ else just pastes the same URL and secret into the app's Settings screen.
 ## 1. Make the spreadsheet
 
 Create a new Google Sheet. Name it something like **Ledger Data**. Leave the
-default tab alone — the script creates `rounds`, `shots` and `courses` itself.
+default tab alone — the script creates `rounds`, `shots`, `courses` and
+`tee_times` itself.
 
 ## 2. Add the script
 
@@ -61,6 +62,14 @@ totals. Entirely derived from `shots` — handy for charts, not authoritative.
 
 **`courses`** is one row per hole per tee set.
 
+**`tee_times`** is one row per scheduled round or practice session. `date` and
+`time` are held as plain **text**, not as date values — a tee time is "the 14th
+at 8:40", not an instant, and letting Sheets parse it attaches a timezone nobody
+chose, which is how a Saturday morning round shows up on Friday night for one
+person in the group. Deleting one stamps `deleted_at` in place rather than
+moving it to an archive tab: there are no shots to protect, but the tombstone
+still has to reach the other phones to stop the entry reappearing.
+
 ## The CORS approach is confirmed working
 
 Verified against a live deployment, not just in theory. A browser `POST` with
@@ -70,7 +79,7 @@ Script cannot answer the preflight a normal JSON POST would trigger.
 
 A quick way to check any deployment without revealing the secret: open the
 `/exec` URL in a browser. A healthy one answers
-`{"ok":true,"service":"ledger","version":1}`. Posting a deliberately wrong
+`{"ok":true,"service":"ledger","contract":7,...}`. Posting a deliberately wrong
 secret should come back `{"ok":false,"error":"Bad or missing secret."}` — that
 response proves transport, parsing and the secret check are all wired up.
 
@@ -99,3 +108,5 @@ limits are in the tens of thousands per day.
 | `Script property LEDGER_SECRET is not set` | Step 3 was skipped, or the property was set on the wrong project. |
 | `Failed to fetch` | The deployment is not set to "Anyone", or the URL is not the `/exec` one. |
 | Changes to `Code.gs` do nothing | Apps Script serves the last *deployed* version. **Deploy → Manage deployments → Edit → New version**. |
+| `This copy of Ledger is older than the sheet expects` | That phone is running a cached build older than `MIN_CLIENT`. Close the app fully and reopen it. Nothing was written, and its rounds are still safe on the device. |
+| A tee time on the wrong day for one person | The `date` column on `tee_times` has been turned back into a date value — most often by editing it by hand. Reformat the column as plain text; **Create Tabs** does it too. |

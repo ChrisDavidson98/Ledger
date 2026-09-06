@@ -13,10 +13,26 @@
 --------------------------------------------------------------- */
 
 import { shotSG, roundTotals, roundScore, roundPar, playedHoles, holeScore } from './model.js';
+import { flattenTeeTime, rebuildTeeTime } from './schedule.js';
 import * as store from './storage.js';
 
 const CONFIG_KEY = 'ledger:sync_config';
 const LAST_PULL_KEY = 'ledger:last_pull';
+
+/**
+ * Which row layout this client writes. Sent on every write so the
+ * backend can refuse one from a client older than it understands.
+ *
+ * A PWA is cached, and a phone that has not been opened since before
+ * a schema change will happily run last month's code against this
+ * month's sheet. That used to be survivable because columns only ever
+ * got added; now that writes carry more structure, a stale client
+ * writing a row it believes in is worse than a stale client being
+ * told to reload. Bump this whenever the shape of what is pushed
+ * changes, and raise MIN_CLIENT in Code.gs when an older shape stops
+ * being safe to accept.
+ */
+export const CLIENT_CONTRACT = 7;
 
 /* --- Config ------------------------------------------------------ */
 
@@ -217,7 +233,7 @@ function attempt(url, body, timeout) {
 async function post(action, payload = {}, { timeout = 20000 } = {}) {
   const { url, secret } = getConfig();
   if (!url || !secret) throw new Error('Sync is not configured.');
-  const body = JSON.stringify({ action, secret, ...payload });
+  const body = JSON.stringify({ action, secret, client: CLIENT_CONTRACT, ...payload });
 
   let lastErr = null;
   for (let tryNum = 0; tryNum < 2; tryNum++) {
@@ -285,6 +301,9 @@ export function flattenRound(round) {
     sg_arg: round2(totals.arg),
     sg_putt: round2(totals.putt),
     sg_total: round2(totals.total),
+    // Blank on anything not started from a scheduled tee time, which
+    // is every round logged before the calendar existed.
+    group_id: round.groupId || '',
   };
 
   const shots = [];
@@ -394,9 +413,10 @@ export function rebuildRound(summaryRow, shotRows) {
 
   return {
     id: String(summaryRow.round_id),
-    schema: 3,
+    schema: 4,
     mode,
     player: String(summaryRow.player),
+    groupId: summaryRow.group_id ? String(summaryRow.group_id) : null,
     courseId: summaryRow.course_id ? String(summaryRow.course_id) : null,
     courseName: String(summaryRow.course_name),
     teeName: String(summaryRow.tee_name),
@@ -521,6 +541,61 @@ export async function pullRounds({ full = false } = {}) {
   return { added, seen: (data.rounds || []).length };
 }
 
+/* --- Tee times ---------------------------------------------------
+   Simpler than rounds, because a tee time is small and flat: one row,
+   no child rows, and deletion is a `deleted_at` stamp on the row
+   itself rather than a move to an archive tab.
+
+   Conflicts are settled by `updated_at`, last write wins. Two people
+   editing the same tee time within seconds of each other is the only
+   way to lose an edit, and the thing at stake is a start time.
+------------------------------------------------------------------ */
+
+export async function pushTeeTimes() {
+  const queued = store.unsyncedTeeTimes();
+  if (!queued.length) return { pushed: 0 };
+
+  const rows = queued
+    .map((id) => store.getTeeTime(id))
+    .filter(Boolean)
+    .map(flattenTeeTime);
+
+  if (!rows.length) {
+    queued.forEach(store.markTeeTimeSynced);
+    return { pushed: 0 };
+  }
+
+  await post('pushTeeTimes', { teeTimes: rows });
+  queued.forEach(store.markTeeTimeSynced);
+  return { pushed: rows.length };
+}
+
+/**
+ * Pull everyone's tee times. Anything this device has edited but not
+ * yet pushed is left alone, and a row from the sheet only lands if it
+ * is genuinely newer than what is here — otherwise a pull that raced
+ * a push would undo the edit that was about to go up.
+ */
+export async function pullTeeTimes() {
+  const data = await post('pullTeeTimes');
+  const pending = new Set(store.unsyncedTeeTimes());
+  const existing = new Map(store.getTeeTimes().map((t) => [t.id, t]));
+  let added = 0;
+
+  (data.teeTimes || []).forEach((row) => {
+    if (!row.tee_time_id) return;
+    const teeTime = rebuildTeeTime(row);
+    if (pending.has(teeTime.id)) return;
+
+    const mine = existing.get(teeTime.id);
+    if (mine && new Date(mine.updatedAt) >= new Date(teeTime.updatedAt)) return;
+    if (!mine) added += 1;
+    store.replaceTeeTime(teeTime);
+  });
+
+  return { added, seen: (data.teeTimes || []).length };
+}
+
 export async function pushCourses() {
   const courses = store.getCourses();
   if (!courses.length) return { pushed: 0 };
@@ -574,6 +649,16 @@ export async function syncAll() {
     result.pulled = (await pullRounds()).added;
   } catch (err) {
     result.errors.push('Pull failed: ' + err.message);
+  }
+
+  // Last, because it is the only part of a sync nothing else depends
+  // on. A calendar that arrives a moment late costs nothing; a round
+  // that does not reach the sheet is the failure worth protecting.
+  try {
+    await pushTeeTimes();
+    result.teeTimes = (await pullTeeTimes()).added;
+  } catch (err) {
+    result.errors.push('Calendar failed: ' + err.message);
   }
 
   return result;

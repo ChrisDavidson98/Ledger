@@ -19,6 +19,8 @@ import {
   classifyShot,
   unitForLie,
   tracksMiss,
+  BENCHMARKS,
+  benchmarkLabel,
 } from './baseline.js';
 
 import {
@@ -51,6 +53,7 @@ import {
   clubGapping,
   holeRecords,
   missTally,
+  groupLeaderboard,
 } from './model.js';
 
 import {
@@ -61,6 +64,33 @@ import {
   careerFilename,
 } from './brief.js';
 
+import {
+  sgByCategoryChart,
+  approachByDistanceChart,
+  rollingMean,
+} from './charts.js';
+
+import {
+  KINDS,
+  KIND_LABELS,
+  PRACTICE_TYPES,
+  WEEKDAYS,
+  newTeeTime,
+  cleanInvitees,
+  playersOf,
+  visibleTeeTimes,
+  describeTeeTime,
+  monthGrid,
+  monthLabel,
+  calendarIndex,
+  todayKey,
+  fmtDateKey,
+  fmtTime,
+  isValidTime,
+  daysFromToday,
+  toICS,
+} from './schedule.js';
+
 import * as store from './storage.js';
 import * as sync from './sync.js';
 import { missingSeeds, cloneSeed } from './seed.js';
@@ -68,6 +98,7 @@ import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js'
 import {
   handicapProfile, fmtHandicap, fmtHandicapShort, upsideFor,
   handicapForTotal, handicapForCategory,
+  rollingImplied, impliedHandicaps, fmtImplied, fmtImpliedShort, MIN_CATEGORY_SHOTS,
 } from './handicap.js';
 
 import {
@@ -114,6 +145,13 @@ const STATE = {
   holePicker: false,
   openHole: null,
   trendKey: 'total',
+  trendSmooth: true,     // rolling average laid over the trend line
+  calYear: null,         // month on show; null means "this month"
+  calMonth: null,
+  calDay: null,          // day whose detail is open
+  teeTimeDraft: null,    // tee time being created or edited
+  viewTeeTimeId: null,
+  missMode: 'count',     // miss grid shaded by frequency, or by cost
   archive: null,
   editShotIdx: null,
   syncBusy: false,
@@ -125,6 +163,45 @@ const STATE = {
   notice: null,
   error: null,
 };
+
+/* --- Benchmark ---------------------------------------------------
+   Which standard strokes gained is measured against on this device.
+
+   Read fresh on every call rather than cached in STATE, because it is
+   a stored preference and a re-render is the only thing that has to
+   see it change. Nothing recomputed against it is written anywhere:
+   the shot rows are the record, the benchmark is how they are read.
+------------------------------------------------------------------ */
+
+function bench() {
+  return store.getBenchmark();
+}
+
+function benchName() {
+  return benchmarkLabel(bench()).toLowerCase();
+}
+
+/**
+ * The one-line reminder of which standard is in force. Every screen
+ * showing a strokes-gained figure carries one, because the number is
+ * meaningless without it — the same round reads −18 against tour and
+ * +2 against a 20 handicap, and both are true.
+ */
+function benchNote() {
+  return `Measured against a <strong>${esc(benchName())}</strong> baseline.`;
+}
+
+/** The compact picker that sits on any screen full of SG figures. */
+function benchPicker() {
+  const current = bench();
+  return `<div class="chip-grid" style="grid-template-columns:repeat(6,1fr);gap:6px">
+    ${BENCHMARKS.map((b) => `
+      <button class="chip ${current === b.key ? 'active' : ''}" data-benchmark="${esc(b.key)}"
+              style="padding:7px 0;font-size:11px;min-height:36px"
+              aria-pressed="${current === b.key}">${esc(b.short)}</button>
+    `).join('')}
+  </div>`;
+}
 
 /* --- Formatting -------------------------------------------------- */
 
@@ -189,14 +266,16 @@ function notices() {
 
 const NAV = [
   { key: 'home', label: 'Play' },
+  { key: 'calendar', label: 'Diary' },
   { key: 'history', label: 'Rounds' },
   { key: 'stats', label: 'Stats' },
-  { key: 'clubhouse', label: 'Clubhouse' },
+  { key: 'clubhouse', label: 'Club' },
   { key: 'courses', label: 'Courses' },
 ];
 
 const NAV_GROUPS = {
   home: ['home', 'setup', 'play', 'scorecard', 'summary'],
+  calendar: ['calendar', 'teeTime', 'teeTimeEdit'],
   history: ['history', 'detail', 'settings'],
   stats: ['stats'],
   clubhouse: ['clubhouse'],
@@ -260,6 +339,7 @@ function screenHome() {
 
   return `${topbar(STATE.player)}
     ${notices()}
+    ${renderScheduleBanner()}
     ${resumable ? `
       <div class="card">
         <h2>Round in progress</h2>
@@ -286,7 +366,7 @@ function screenHome() {
             <div class="rname">${esc(last.courseName)}</div>
             <div class="rsub">${fmtDate(last.date)} &middot; ${esc(last.teeName)}</div>
           </div>
-          <div class="row-val ${sgClass(roundTotals(last).total)}">${fmtSG(roundTotals(last).total)}</div>
+          <div class="row-val ${sgClass(roundTotals(last, bench()).total)}">${fmtSG(roundTotals(last, bench()).total)}</div>
         </button>
       </div>` : ''}
 
@@ -496,7 +576,7 @@ function screenPlay() {
         <div class="stat-box"><div class="val">${hole.par}</div><div class="lbl">Par</div></div>
         <div class="stat-box"><div class="val">${hole.yards}</div><div class="lbl">Yards</div></div>
         <div class="stat-box"><div class="val">${holeScore(hole)}</div><div class="lbl">Strokes</div></div>
-        <div class="stat-box"><div class="val ${sgClass(holeTotals(hole).total)}">${fmtSG(holeTotals(hole).total)}</div><div class="lbl">SG</div></div>
+        <div class="stat-box"><div class="val ${sgClass(holeTotals(hole, bench()).total)}">${fmtSG(holeTotals(hole, bench()).total)}</div><div class="lbl">SG</div></div>
       </div>
     </div>
 
@@ -520,7 +600,7 @@ function screenPlay() {
 }
 
 function renderShotLine(shot, hole, index) {
-  const { category, sg } = shotSG(shot, hole.par);
+  const { category, sg } = shotSG(shot, hole.par, bench());
   const from = `${LIE_LABELS[shot.startLie]} ${fmtDist(shot.startDist, shot.startUnit)}`;
   const to = shot.holed
     ? 'holed'
@@ -661,7 +741,7 @@ function renderShotForm(hole, start, category, shotNum) {
 }
 
 function renderHoleComplete(hole) {
-  const totals = holeTotals(hole);
+  const totals = holeTotals(hole, bench());
   const score = holeScore(hole);
   const last = STATE.holeIdx >= STATE.round.holes.length - 1;
   return `<div class="card">
@@ -692,7 +772,7 @@ function screenSummary() {
 }
 
 function roundReport(round) {
-  const totals = roundTotals(round);
+  const totals = roundTotals(round, bench());
   const score = roundScore(round);
   const holes = playedHoles(round);
   return `<div class="card">
@@ -707,6 +787,13 @@ function roundReport(round) {
         </div>
         <p class="tiny" style="margin-top:10px">Score only &mdash; no shots were logged, so this round has no strokes gained and is left out of every average. It still counts for scoring and the trend.</p>
       ` : `
+        ${/*
+           The single most useful thing on this screen. Four numbers in
+           boxes have to be compared one at a time; the same four as
+           bars off a shared zero answer "where did this round go" at a
+           glance, which is the question the screen exists for.
+        */''}
+        ${sgByCategoryChart(totals, { label: benchName() })}
         <div class="stat-grid g4">
           ${CATEGORIES.map((c) => `
             <div class="stat-box">
@@ -717,8 +804,10 @@ function roundReport(round) {
         <div style="text-align:center;margin-top:14px">
           <div class="muted">Total strokes gained</div>
           <div class="display ${sgClass(totals.total)}" style="font-size:32px">${fmtSG(totals.total)}</div>
-          <div class="tiny">vs. tour baseline</div>
+          <div class="tiny">vs. ${esc(benchName())} baseline</div>
         </div>
+        ${benchPicker()}
+        <p class="tiny">${benchNote()} Changing this recomputes every figure from the shots as they were logged &mdash; nothing is rewritten, and it changes nothing for anyone else.</p>
       `}
     </div>
     ${isScoreOnly(round) ? '' : renderRoundBreakdown(round)}
@@ -727,7 +816,7 @@ function roundReport(round) {
       <h2>Hole by hole</h2>
       <p class="muted">${isScoreOnly(round) ? 'Scores as entered.' : 'Tap a hole to see the shots.'}</p>
       ${holes.map((h) => {
-        const t = holeTotals(h);
+        const t = holeTotals(h, bench());
         const s = holeScore(h);
         const open = STATE.openHole === h.hole;
         return `<button class="row" data-open-hole="${h.hole}" style="border-radius:0;background:${open ? 'var(--cream)' : 'none'}">
@@ -742,7 +831,7 @@ function roundReport(round) {
           </button>
           ${open ? `<div style="padding:4px 0 12px 52px">
             ${h.shots.map((s2) => {
-              const { category, sg } = shotSG(s2, h.par);
+              const { category, sg } = shotSG(s2, h.par, bench());
               const to = s2.holed ? 'holed' : `${LIE_LABELS[s2.endLie]} ${fmtDist(s2.endDist, s2.endUnit)}`;
               return `<div class="shot-line" style="padding:5px 0">
                 <span class="desc tiny">${s2.n}. ${LIE_LABELS[s2.startLie]} ${fmtDist(s2.startDist, s2.startUnit)} &rarr; ${esc(to)}
@@ -765,16 +854,16 @@ function renderRoundBreakdown(round) {
   const holes = playedHoles(round);
   const holeCount = holes.length || 1;
   const gir = greensInRegulation(rounds);
-  const tee = teeOutcomes(rounds);
-  const putts = puttingBuckets(rounds);
-  const buckets = approachBuckets(rounds);
+  const tee = teeOutcomes(rounds, bench());
+  const putts = puttingBuckets(rounds, bench());
+  const buckets = approachBuckets(rounds, bench());
   const totalPutts = putts.reduce((s, b) => s + b.putts, 0);
-  const totals = roundTotals(round);
+  const totals = roundTotals(round, bench());
 
   // Which hole cost the most, and which part of the game it was.
   const worstHole = holes.reduce((worst, h) => {
-    const t = holeTotals(h).total;
-    return worst === null || t < holeTotals(worst).total ? h : worst;
+    const t = holeTotals(h, bench()).total;
+    return worst === null || t < holeTotals(worst, bench()).total ? h : worst;
   }, null);
   const worstCategory = CATEGORIES.reduce((a, b) => (totals[a] <= totals[b] ? a : b));
 
@@ -787,6 +876,9 @@ function renderRoundBreakdown(round) {
   const profile = handicapProfile(per18);
 
   return `${renderHandicapCard(profile, {
+      // One round rarely clears the shot threshold in every category,
+      // which is the point of passing it: the thin ones say so.
+      implied: impliedHandicaps(rounds),
       subtitle: `This round on its own, scaled to 18 holes${holeCount !== 18 ? ` from ${holeCount}` : ''}.`,
       caveat: 'One round is a small sample — a hot putter or two lost balls will move these more than the Stats tab, where it averages out. Useful for reading the round; use Stats for reading the game.',
     })}
@@ -801,7 +893,7 @@ function renderRoundBreakdown(round) {
       </div>
       <p class="tiny" style="margin-top:10px">
         ${CATEGORY_LABELS[worstCategory]} cost the most at ${fmtSG(totals[worstCategory])}${
-          worstHole ? `, and hole ${worstHole.hole} was the single worst at ${fmtSG(holeTotals(worstHole).total)}` : ''
+          worstHole ? `, and hole ${worstHole.hole} was the single worst at ${fmtSG(holeTotals(worstHole, bench()).total)}` : ''
         }.
       </p>
     </div>
@@ -809,8 +901,8 @@ function renderRoundBreakdown(round) {
     ${renderTeeCard(tee)}
     ${renderApproachCard(buckets)}
     ${renderPuttingCard(putts)}
-    ${renderMissCard('Tee shot misses', missTally(rounds, 'ott'))}
-    ${renderMissCard('Approach misses', missTally(rounds, 'app'))}`;
+    ${renderMissCard('Tee shot misses', missTally(rounds, 'ott', bench()))}
+    ${renderMissCard('Approach misses', missTally(rounds, 'app', bench()))}`;
 }
 
 function screenHistory() {
@@ -838,8 +930,8 @@ function screenHistory() {
               isScoreOnly(r) ? ' &middot; score only' : ''
             }</div>
           </div>
-          <div class="row-val ${isScoreOnly(r) ? '' : sgClass(roundTotals(r).total)}">${
-            isScoreOnly(r) ? '<span class="tiny">no SG</span>' : fmtSG(roundTotals(r).total)
+          <div class="row-val ${isScoreOnly(r) ? '' : sgClass(roundTotals(r, bench()).total)}">${
+            isScoreOnly(r) ? '<span class="tiny">no SG</span>' : fmtSG(roundTotals(r, bench()).total)
           }</div>
         </button>`).join('')}
     </div>
@@ -932,6 +1024,22 @@ function screenSettings() {
         <button class="btn-ghost" data-action="copy-setup-link">Copy Setup Link</button>
         <p class="tiny">The link carries the sheet address only &mdash; never the passphrase. Tell them that separately, and not in the same message.</p>
       </div>` : ''}
+
+    <div class="card">
+      <h2>Benchmark</h2>
+      <p class="muted">Strokes gained answers "compared with whom". Tour is the default and is what every figure meant before this setting existed; the handicap levels ask the same question against somebody nearer your own game, where zero means you played to that standard.</p>
+      ${benchPicker()}
+      <p class="tiny">This is a way of reading the data, not a change to it. Every figure is recomputed from the shots exactly as they were logged, nothing is written back to the sheet, and the setting stays on this phone &mdash; so two people can look at the same round against different standards without either of them affecting the other.</p>
+      <p class="tiny">Only the tour table is measured data. The handicap levels are built from it plus the strokes a golfer at that level is expected to lose, spread across the positions a round passes through. Good enough to answer "was that a decent round for a 15", not a substitute for a real tour dataset at every level.</p>
+
+      <label>Rolling window</label>
+      <div class="chip-grid">
+        ${[5, 10, 20].map((n) => `
+          <button class="chip ${store.getHandicapWindow() === n ? 'active' : ''}" data-hcp-window="${n}">${n} rounds</button>
+        `).join('')}
+      </div>
+      <p class="tiny">How far back the per-category "plays like" figures look. Shorter follows form; longer is steadier but slower to notice you have got better.</p>
+    </div>
 
     <div class="card">
       <h2>Appearance</h2>
@@ -1056,6 +1164,416 @@ function screenDetail() {
     </div>`;
 }
 
+/* --- Calendar ----------------------------------------------------
+   A month of what is booked and what has already been played, which
+   turns out to be the same screen: by December the grid IS the season.
+
+   Everything here is a plan. Nothing on this screen is ever the record
+   of what happened — that is a round, written by whoever played it.
+------------------------------------------------------------------ */
+
+/** Tee times this player owns or was invited to, soonest first. */
+function visibleSchedule() {
+  return visibleTeeTimes(store.getLiveTeeTimes(), STATE.player)
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''));
+}
+
+/** Anything booked for today and not yet cancelled. */
+function todaysTeeTimes() {
+  const today = todayKey();
+  return visibleSchedule().filter((t) => t.date === today && t.status === 'scheduled');
+}
+
+function calendarCursor() {
+  const now = new Date();
+  return {
+    year: STATE.calYear == null ? now.getFullYear() : STATE.calYear,
+    month: STATE.calMonth == null ? now.getMonth() : STATE.calMonth,
+  };
+}
+
+function screenCalendar() {
+  const { year, month } = calendarCursor();
+  const schedule = visibleSchedule();
+  // Everyone's rounds, not just this player's — a day the group played
+  // is a day worth seeing on the calendar even if you sat it out.
+  const index = calendarIndex(schedule, store.getRounds());
+  const weeks = monthGrid(year, month);
+  const today = todayKey();
+
+  const upcoming = schedule
+    .filter((t) => t.date >= today && t.status === 'scheduled')
+    .slice(0, 4);
+
+  const dayCell = (day) => {
+    const entry = index.get(day.key) || { teeTimes: [], rounds: [] };
+    const mine = entry.rounds.filter((r) => r.player === STATE.player);
+    const scheduled = entry.teeTimes.filter((t) => t.status === 'scheduled');
+    const cancelled = entry.teeTimes.filter((t) => t.status === 'cancelled');
+
+    const marks = [];
+    if (mine.length) marks.push('<span class="mk done" aria-hidden="true">&#10003;</span>');
+    scheduled.filter((t) => t.kind === 'round')
+      .slice(0, 2).forEach(() => marks.push('<span class="mk round"></span>'));
+    scheduled.filter((t) => t.kind === 'practice')
+      .slice(0, 2).forEach(() => marks.push('<span class="mk practice"></span>'));
+    if (cancelled.length && !scheduled.length) marks.push('<span class="mk cancelled"></span>');
+
+    const classes = [
+      'cal-day',
+      day.inMonth ? '' : 'muted-day',
+      day.isToday ? 'today' : '',
+      mine.length ? 'played' : '',
+      entry.teeTimes.length ? 'has-events' : '',
+    ].filter(Boolean).join(' ');
+
+    // The label is what a screen reader gets, so it has to say in
+    // words what the dots say in shapes.
+    const described = [
+      mine.length ? `${mine.length} round played` : '',
+      scheduled.length ? `${scheduled.length} scheduled` : '',
+    ].filter(Boolean).join(', ');
+
+    return `<button class="${classes}" data-cal-day="${day.key}"
+      aria-label="${esc(fmtDateKey(day.key))}${described ? ', ' + described : ''}">
+      <span>${day.day}</span>
+      <span class="marks">${marks.join('')}</span>
+    </button>`;
+  };
+
+  return `${topbar('Diary')}
+    ${notices()}
+    ${renderScheduleBanner()}
+
+    <div class="card">
+      <div class="cal-nav">
+        <button data-cal-step="-1" aria-label="Previous month">&lsaquo;</button>
+        <h2>${esc(monthLabel(year, month))}</h2>
+        <button data-cal-step="1" aria-label="Next month">&rsaquo;</button>
+      </div>
+      <div class="cal-head">${WEEKDAYS.map((d) => `<span>${d}</span>`).join('')}</div>
+      <div class="cal-grid">${weeks.map((week) => week.map(dayCell).join('')).join('')}</div>
+      <div class="cal-legend">
+        <span><i class="mk round" style="width:6px;height:6px;border-radius:50%;background:var(--green-mid);display:inline-block"></i> round booked</span>
+        <span><i style="width:6px;height:6px;border-radius:50%;border:1.5px solid var(--green-mid);display:inline-block"></i> practice</span>
+        <span><i style="color:var(--green-mid);font-weight:700">&#10003;</i> played</span>
+      </div>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="cal-today">Today</button>
+        <button class="btn-primary" data-action="new-tee-time" data-date="${esc(today)}">Add</button>
+      </div>
+    </div>
+
+    ${STATE.calDay ? renderDayCard(STATE.calDay, index.get(STATE.calDay)) : ''}
+
+    <div class="card">
+      <div class="split">
+        <h2>Coming up</h2>
+        <span class="tiny">${schedule.length ? `${schedule.length} in the diary` : ''}</span>
+      </div>
+      ${upcoming.length ? upcoming.map((t) => teeTimeRow(t)).join('') : `
+        <div class="empty">
+          <div class="glyph">&#128197;</div>
+          <div>Nothing booked. Tap a day to put something in.</div>
+        </div>`}
+      ${upcoming.length ? `
+        <button class="btn-ghost" style="margin-top:10px" data-action="export-calendar">Add All to iPhone Calendar</button>
+        <p class="tiny">Downloads a calendar file. Opening it on the phone offers to add every upcoming entry. It only goes one way &mdash; Ledger cannot read your calendar back, so this stays the place a tee time is changed.</p>
+      ` : ''}
+    </div>`;
+}
+
+/** One tee time as a tappable row. */
+function teeTimeRow(teeTime) {
+  const days = daysFromToday(teeTime.date);
+  const when = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : fmtDateKey(teeTime.date);
+  const others = (teeTime.invitees || []).length;
+
+  return `<button class="row" data-action="view-tee-time" data-id="${esc(teeTime.id)}">
+    <div class="badge" style="font-size:11px">${teeTime.kind === 'practice' ? 'PR' : 'GO'}</div>
+    <div class="row-meta">
+      <div class="rname">${esc(describeTeeTime(teeTime))}${
+        teeTime.status === 'cancelled' ? ' <span class="tiny">cancelled</span>' : ''
+      }</div>
+      <div class="rsub">${esc(when)} &middot; ${esc(fmtTime(teeTime.time))}${
+        others ? ` &middot; with ${esc(teeTime.invitees.join(', '))}` : ''
+      }</div>
+    </div>
+    <div class="row-val">&rsaquo;</div>
+  </button>`;
+}
+
+/** What one day of the month holds, opened by tapping it. */
+function renderDayCard(key, entry) {
+  const day = entry || { teeTimes: [], rounds: [] };
+  const mine = day.rounds.filter((r) => r.player === STATE.player);
+  const others = day.rounds.filter((r) => r.player !== STATE.player);
+
+  return `<div class="card">
+    <div class="split">
+      <h2>${esc(fmtDateKey(key))}</h2>
+      <button class="chip" data-cal-day="" style="min-height:34px;padding:0 12px">Close</button>
+    </div>
+
+    ${day.teeTimes.length ? day.teeTimes.map((t) => teeTimeRow(t)).join('') : ''}
+
+    ${mine.map((r) => `
+      <button class="row" data-action="view-round" data-id="${esc(r.id)}">
+        <div class="badge">${fmtToPar(roundToPar(r))}</div>
+        <div class="row-meta">
+          <div class="rname">${esc(r.courseName)}</div>
+          <div class="rsub">Played &middot; ${roundScore(r)} strokes</div>
+        </div>
+        <div class="row-val">&rsaquo;</div>
+      </button>`).join('')}
+
+    ${others.length ? `<p class="tiny" style="margin-top:8px">${
+      others.map((r) => `${esc(r.player)} played ${esc(r.courseName)}`).join('. ')
+    }.</p>` : ''}
+
+    ${!day.teeTimes.length && !day.rounds.length ? `
+      <p class="muted">Nothing on this day yet.</p>` : ''}
+
+    <button class="btn-primary" style="margin-top:10px"
+            data-action="new-tee-time" data-date="${esc(key)}">Book Something</button>
+  </div>`;
+}
+
+/**
+ * The one thing the calendar owes the rest of the app: on the morning
+ * of a round, a way into it that skips choosing the course you already
+ * chose when you booked it.
+ *
+ * Kept deliberately plain. No streak, no encouragement, no countdown —
+ * it is a button that starts the round you are about to play.
+ */
+function renderScheduleBanner() {
+  // Nothing to offer while a round is already in progress.
+  if (STATE.round && !isRoundComplete(STATE.round)) return '';
+
+  const today = todaysTeeTimes();
+  if (!today.length) return '';
+
+  return today.map((teeTime) => {
+    const played = store.getRounds().some(
+      (r) => r.groupId === teeTime.groupId && r.player === STATE.player
+    );
+    const course = teeTime.courseId ? safeCourse(teeTime.courseId) : null;
+    const ready = teeTime.kind === 'round' && course && !played;
+
+    return `<div class="card">
+      <div class="split">
+        <h2>Today${teeTime.time ? ` &middot; ${esc(fmtTime(teeTime.time))}` : ''}</h2>
+        <span class="tiny">${esc(KIND_LABELS[teeTime.kind])}</span>
+      </div>
+      <p class="muted">${esc(describeTeeTime(teeTime))}${
+        teeTime.teeName ? ` &mdash; ${esc(teeTime.teeName)} tees` : ''
+      }${(teeTime.invitees || []).length ? `<br>With ${esc(teeTime.invitees.join(', '))}` : ''}</p>
+      ${played ? `<p class="tiny">Your round for this one is already logged.</p>` : ''}
+      ${ready ? `
+        <button class="btn-flag" data-action="start-scheduled" data-id="${esc(teeTime.id)}">
+          Start Round
+        </button>` : ''}
+      ${!played && teeTime.kind === 'round' && !course ? `
+        <p class="tiny">The course this was booked against is not saved on this phone, so the round has to be started the usual way.</p>` : ''}
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="view-tee-time" data-id="${esc(teeTime.id)}">Details</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function screenTeeTime() {
+  const teeTime = store.getTeeTime(STATE.viewTeeTimeId);
+  if (!teeTime || teeTime.deletedAt) return screenCalendar();
+
+  const days = daysFromToday(teeTime.date);
+  const isToday = days === 0;
+  const course = teeTime.courseId ? safeCourse(teeTime.courseId) : null;
+  const board = groupLeaderboard(store.getRounds(), teeTime.groupId, bench());
+  const mine = board.some((row) => row.player === STATE.player);
+
+  return `${topbar('Tee Time')}
+    ${notices()}
+    <div class="card">
+      <h2>${esc(describeTeeTime(teeTime))}</h2>
+      <p class="muted">
+        ${esc(fmtDateKey(teeTime.date))} &middot; ${esc(fmtTime(teeTime.time))}<br>
+        ${esc(KIND_LABELS[teeTime.kind])}${teeTime.teeName ? ` &middot; ${esc(teeTime.teeName)} tees` : ''}
+        ${teeTime.holes ? ` &middot; ${teeTime.holes} holes` : ''}<br>
+        ${esc(playersOf(teeTime).join(', '))}
+      </p>
+      ${teeTime.notes ? `<p class="tiny">${esc(teeTime.notes)}</p>` : ''}
+      ${teeTime.status === 'cancelled' ? `<div class="err-box">Cancelled.</div>` : ''}
+      ${teeTime.status === 'played' ? `<div class="ok-box">Marked as played.</div>` : ''}
+
+      ${isToday && teeTime.status === 'scheduled' && teeTime.kind === 'round' && course && !mine ? `
+        <button class="btn-flag" data-action="start-scheduled" data-id="${esc(teeTime.id)}">Start Round</button>
+      ` : ''}
+
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="export-tee-time" data-id="${esc(teeTime.id)}">Add to iPhone Calendar</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="edit-tee-time" data-id="${esc(teeTime.id)}">Edit</button>
+        ${teeTime.status === 'cancelled'
+          ? `<button class="btn-ghost" data-action="uncancel-tee-time" data-id="${esc(teeTime.id)}">Reinstate</button>`
+          : `<button class="btn-danger" data-action="cancel-tee-time" data-id="${esc(teeTime.id)}">Cancel</button>`}
+      </div>
+      <div class="btn-row">
+        <button class="btn-danger" data-action="delete-tee-time" data-id="${esc(teeTime.id)}">Remove from Diary</button>
+      </div>
+      <p class="tiny">Cancelling keeps the entry and marks it off. Removing takes it off everyone's calendar.</p>
+    </div>
+
+    ${board.length ? renderGroupCard(board) : (
+      teeTime.status !== 'cancelled' && days < 0 && teeTime.kind === 'round' ? `
+      <div class="card">
+        <h2>No rounds logged</h2>
+        <p class="muted">Nobody has logged a round against this tee time. Rounds join up here automatically once they sync &mdash; each player writes their own, and they find each other afterwards.</p>
+      </div>` : ''
+    )}
+
+    <button class="btn-ghost" data-action="goto-calendar">&larr; Back</button>`;
+}
+
+/**
+ * Everyone who played the same tee time, side by side.
+ *
+ * Assembled entirely on read from rounds that arrived separately.
+ * Nobody wrote to a shared record, which is what makes this work at
+ * all over a sheet and a bad signal.
+ */
+function renderGroupCard(board) {
+  return `<div class="card">
+    <div class="split">
+      <h2>How it went</h2>
+      <span class="tiny">${board.length} card${board.length === 1 ? '' : 's'}</span>
+    </div>
+    <div class="card-editor">
+      <div class="hdr" style="grid-template-columns:1fr 44px 52px 56px">
+        <span>Player</span>
+        <span style="text-align:center">Holes</span>
+        <span style="text-align:center">Score</span>
+        <span style="text-align:center">SG</span>
+      </div>
+      ${board.map((row) => `
+        <div class="line" style="grid-template-columns:1fr 44px 52px 56px">
+          <span><strong>${esc(row.player)}</strong></span>
+          <span class="mono" style="text-align:center;font-size:12px">${row.holes}</span>
+          <span class="mono" style="text-align:center;font-size:12px">${row.score} <span class="tiny">${fmtToPar(row.toPar)}</span></span>
+          <span class="mono ${row.sg ? sgClass(row.sg.total) : ''}" style="text-align:center;font-size:12px">${
+            row.sg ? fmtSG(row.sg.total) : '<span class="tiny">—</span>'
+          }</span>
+        </div>`).join('')}
+    </div>
+    <p class="tiny" style="margin-top:8px">${benchNote()} ${
+      board.some((r) => r.holes !== board[0].holes)
+        ? 'These cards are not all the same length, so the scores are not directly comparable.'
+        : ''
+    }</p>
+  </div>`;
+}
+
+function screenTeeTimeEdit() {
+  const draft = STATE.teeTimeDraft;
+  if (!draft) return screenCalendar();
+
+  const editing = Boolean(draft.id);
+  const courses = listCourses();
+  const course = draft.courseId ? safeCourse(draft.courseId) : null;
+  const options = course ? playOptions(course) : [];
+  const roster = store.getRoster().filter((n) => n !== STATE.player);
+
+  return `${topbar(editing ? 'Edit Tee Time' : 'New Tee Time')}
+    ${notices()}
+
+    <div class="card">
+      <h2>What and when</h2>
+      <div class="chip-grid g2">
+        ${KINDS.map((k) => `
+          <button class="chip ${draft.kind === k ? 'active' : ''}" data-tt-kind="${k}">${KIND_LABELS[k]}</button>
+        `).join('')}
+      </div>
+
+      <label>Date</label>
+      <input type="date" id="ttDate" value="${esc(draft.date || '')}">
+
+      <label>Time</label>
+      <input type="time" id="ttTime" value="${esc(draft.time || '')}">
+      <p class="tiny">Leave the time blank if it is not booked yet &mdash; it shows as TBD and exports as an all-day entry.</p>
+    </div>
+
+    ${draft.kind === 'practice' ? `
+      <div class="card">
+        <h2>Practice</h2>
+        <div class="chip-grid g2">
+          ${PRACTICE_TYPES.map((p) => `
+            <button class="chip ${draft.practiceType === p ? 'active' : ''}" data-tt-practice="${esc(p)}">${esc(p)}</button>
+          `).join('')}
+        </div>
+      </div>
+    ` : `
+      <div class="card">
+        <h2>Course</h2>
+        ${courses.length ? courses.map((c) => `
+          <button class="row" data-tt-course="${esc(c.id)}"
+                  style="${c.id === draft.courseId ? 'background:var(--cream)' : ''}">
+            <div class="badge">${c.nines.length * 9}</div>
+            <div class="row-meta">
+              <div class="rname">${esc(c.name)}</div>
+              <div class="rsub">${esc(c.teeNames.join(' · '))}</div>
+            </div>
+            <div class="row-val">${c.id === draft.courseId ? '&check;' : '&rsaquo;'}</div>
+          </button>`).join('') : `
+          <p class="muted">No courses saved yet. You can still book a time and pick the course later.</p>`}
+
+        ${course ? `
+          <label>Tees</label>
+          <div class="chip-grid">
+            ${course.teeNames.map((name) => `
+              <button class="chip ${draft.teeName === name ? 'active' : ''}" data-tt-tee="${esc(name)}">${esc(name)}</button>
+            `).join('')}
+          </div>
+
+          <label>Playing</label>
+          <div class="chip-grid g2">
+            ${options.map((option) => `
+              <button class="chip ${draft.layoutKey === option.key ? 'active' : ''}"
+                      data-tt-layout="${esc(option.key)}" data-holes="${option.holeCount}"
+                      style="font-size:12px">${esc(option.label)}</button>
+            `).join('')}
+          </div>
+          <p class="tiny">Choosing this now is what lets the round start straight from the diary on the day, without going back through the course picker.</p>
+        ` : ''}
+      </div>
+    `}
+
+    <div class="card">
+      <h2>Who else</h2>
+      ${roster.length ? `
+        <div class="chip-grid">
+          ${roster.map((name) => `
+            <button class="chip ${(draft.invitees || []).includes(name) ? 'active' : ''}"
+                    data-tt-invite="${esc(name)}">${esc(name)}</button>
+          `).join('')}
+        </div>
+        <p class="tiny">They see it on their own diary once their phone syncs. Everyone still logs their own round; the group card comes from joining them up afterwards.</p>
+      ` : `<p class="muted">Nobody else is on this device's roster. Add names in Settings.</p>`}
+
+      <label>Notes</label>
+      <textarea id="ttNotes" rows="2"
+        style="width:100%;padding:12px;border-radius:9px;border:1.5px solid var(--green-line);background:var(--paper);font-family:inherit;font-size:16px;color:var(--ink)">${esc(draft.notes || '')}</textarea>
+    </div>
+
+    <div class="card">
+      <button class="btn-primary" data-action="save-tee-time">${editing ? 'Save Changes' : 'Add to Diary'}</button>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="goto-calendar">Cancel</button>
+      </div>
+    </div>`;
+}
+
 function screenStats() {
   const allRounds = playerRounds();
   // Everything strokes-gained is computed from rounds that actually
@@ -1076,7 +1594,7 @@ function screenStats() {
 
   if (rounds.length === 0) {
     return `${topbar(`${STATE.player} · Stats`)}
-      ${renderTrendCard(trendSeries(allRounds), 'toPar')}
+      ${renderTrendCard(trendSeries(allRounds, bench()), 'toPar')}
       <div class="card">
         <h2>No shot data yet</h2>
         <p class="muted">All ${allRounds.length} of your rounds are score only, so there is nothing to measure against the baseline. Track one round shot by shot and the rest of this page fills in.</p>
@@ -1088,26 +1606,40 @@ function screenStats() {
   const holesPlayed = rounds.reduce((sum, r) => sum + playedHoles(r).length, 0) || 1;
   const avg = {};
   CATEGORIES.forEach((c) => {
-    const total = rounds.reduce((sum, r) => sum + roundTotals(r)[c], 0);
+    const total = rounds.reduce((sum, r) => sum + roundTotals(r, bench())[c], 0);
     avg[c] = (total / holesPlayed) * 18;
   });
   const avgTotal = CATEGORIES.reduce((sum, c) => sum + avg[c], 0);
   const nineCount = rounds.filter((r) => playedHoles(r).length <= 9).length;
-  const buckets = approachBuckets(rounds);
-  const teeMiss = missTally(rounds, 'ott');
-  const appMiss = missTally(rounds, 'app');
+  const buckets = approachBuckets(rounds, bench());
+  const teeMiss = missTally(rounds, 'ott', bench());
+  const appMiss = missTally(rounds, 'app', bench());
 
   const profile = handicapProfile({ ...avg, total: avgTotal });
   const gir = greensInRegulation(rounds);
-  const tee = teeOutcomes(rounds);
-  const putts = puttingBuckets(rounds);
+  const tee = teeOutcomes(rounds, bench());
+  const putts = puttingBuckets(rounds, bench());
+
+  const window = store.getHandicapWindow();
+  const implied = rollingImplied(rounds, { window });
 
   return `${topbar(`${STATE.player} · Stats`)}
+    <div class="card">
+      <div class="split">
+        <h2>Benchmark</h2>
+        <span class="tiny">${esc(benchName())}</span>
+      </div>
+      <p class="muted">Which standard every strokes-gained figure below is measured against.</p>
+      ${benchPicker()}
+      <p class="tiny">${benchNote()} Nothing is rewritten when you change it &mdash; the shot records are the same, and this is only how they are read. It applies on this device alone, so two people can look at the same round against different standards.</p>
+    </div>
+
     ${renderHandicapCard(profile, {
+      implied,
       subtitle: `Across ${rounds.length} round${rounds.length === 1 ? '' : 's'}, ${holesPlayed} holes. Each part of your game translated to the handicap that normally plays it that well.`,
     })}
 
-    ${renderTrendCard(trendSeries(allRounds))}
+    ${renderTrendCard(trendSeries(allRounds, bench()))}
 
     <div class="card">
       <h2>The basics</h2>
@@ -1165,16 +1697,16 @@ function screenStats() {
         <span class="muted">Total </span>
         <span class="mono ${sgClass(avgTotal)}" style="font-size:18px;font-weight:700">${fmtSG(avgTotal)}</span>
       </div>
-      <p class="tiny" style="margin-top:10px">Measured against a tour baseline, so negatives are expected. What matters is which column is furthest from the others.</p>
+      <p class="tiny" style="margin-top:10px">${benchNote()} Against tour, negatives are expected; against a handicap level, zero is that standard. What matters is which column is furthest from the others.</p>
     </div>
 
     ${renderApproachCard(buckets)}
 
     ${renderMissCard('Tee shot misses', teeMiss)}
     ${renderMissCard('Approach misses', appMiss)}
-    ${(() => { const cd = clubDistances(rounds); return renderClubCard(cd) + renderGappingCard(cd); })()}
+    ${(() => { const cd = clubDistances(rounds, bench()); return renderClubCard(cd) + renderGappingCard(cd); })()}
     ${renderNemesisCard(rounds)}
-    ${renderBestsCard(personalBests(rounds), allRounds)}
+    ${renderBestsCard(personalBests(rounds, bench()), allRounds)}
     ${renderComparison()}
 
     <div class="card">
@@ -1206,7 +1738,7 @@ function renderComparison() {
     const holes = theirs.reduce((sum, r) => sum + playedHoles(r).length, 0) || 1;
     const totals = {};
     CATEGORIES.forEach((c) => {
-      totals[c] = (theirs.reduce((sum, r) => sum + roundTotals(r)[c], 0) / holes) * 18;
+      totals[c] = (theirs.reduce((sum, r) => sum + roundTotals(r, bench())[c], 0) / holes) * 18;
     });
     totals.total = CATEGORIES.reduce((sum, c) => sum + totals[c], 0);
     return { player, rounds: theirs.length, holes, totals };
@@ -1242,7 +1774,7 @@ function renderComparison() {
           </span>
         </div>`).join('')}
     </div>
-    <p class="tiny" style="margin-top:8px">Everyone is measured against the same tour baseline, so these compare directly even off different tees.</p>
+    <p class="tiny" style="margin-top:8px">${benchNote()} Everyone is measured against the same one, so these compare directly even off different tees.</p>
   </div>`;
 }
 
@@ -1295,6 +1827,20 @@ function renderTrendCard(allSeries, forcedKey) {
   const area = `${line} L${x(series.length - 1).toFixed(1)},${y(min).toFixed(1)} L${x(0).toFixed(1)},${y(min).toFixed(1)} Z`;
   const zeroY = y(0).toFixed(1);
 
+  /*
+   * Round to round, this line is mostly noise: one hot putting day
+   * moves it further than a month of getting better does. The rolling
+   * mean is the part worth reading, so it is drawn on top and on by
+   * default, with the raw line left underneath rather than replaced —
+   * a smoothed line alone hides how erratic the scoring actually is.
+   */
+  const smoothWindow = 5;
+  const smoothOn = STATE.trendSmooth !== false && series.length >= 4;
+  const smoothed = smoothOn ? rollingMean(values, smoothWindow) : null;
+  const smoothPath = smoothed
+    ? smoothed.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
+    : '';
+
   const first = values[0];
   const last = values[values.length - 1];
   const change = last - first;
@@ -1324,11 +1870,15 @@ function renderTrendCard(allSeries, forcedKey) {
             font-size="9" fill="var(--ink-faint)" font-family="IBM Plex Mono, monospace">${max.toFixed(0)}</text>` : ''}
       ${Math.abs(y(min) - y(0)) > 11 ? `<text x="${padL - 4}" y="${H - padB}" text-anchor="end"
             font-size="9" fill="var(--ink-faint)" font-family="IBM Plex Mono, monospace">${min.toFixed(0)}</text>` : ''}
-      <path d="${line}" fill="none" stroke="var(--flag)" stroke-width="2"
-            stroke-linejoin="round" stroke-linecap="round"></path>
+      <path d="${line}" fill="none" stroke="var(--flag)" stroke-width="${smoothOn ? 1.2 : 2}"
+            stroke-linejoin="round" stroke-linecap="round"
+            opacity="${smoothOn ? 0.45 : 1}"></path>
+      ${smoothPath ? `<path d="${smoothPath}" fill="none" stroke="var(--green-mid)"
+            stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"></path>` : ''}
       ${series.map((p, i) => `
-        <circle cx="${x(i).toFixed(1)}" cy="${y(p[key]).toFixed(1)}" r="3.5"
-                fill="var(--paper)" stroke="var(--flag)" stroke-width="2"></circle>
+        <circle cx="${x(i).toFixed(1)}" cy="${y(p[key]).toFixed(1)}" r="${smoothOn ? 2.4 : 3.5}"
+                fill="var(--paper)" stroke="var(--flag)" stroke-width="${smoothOn ? 1.4 : 2}"
+                opacity="${smoothOn ? 0.6 : 1}"></circle>
       `).join('')}
       <text x="${padL}" y="${H - 6}" font-size="9" fill="var(--ink-faint)">${fmtShortDate(series[0].date)}</text>
       <text x="${W - padR}" y="${H - 6}" text-anchor="end" font-size="9" fill="var(--ink-faint)">${fmtShortDate(series[series.length - 1].date)}</text>
@@ -1348,9 +1898,18 @@ function renderTrendCard(allSeries, forcedKey) {
         <div class="lbl">Since first</div>
       </div>
     </div>
+    ${series.length >= 4 ? `
+      <div class="chip-grid g2" style="gap:6px">
+        <button class="chip ${smoothOn ? 'active' : ''}" data-smooth="on"
+                style="padding:7px 0;font-size:11px;min-height:36px">${smoothWindow}-round average</button>
+        <button class="chip ${smoothOn ? '' : 'active'}" data-smooth="off"
+                style="padding:7px 0;font-size:11px;min-height:36px">Every round</button>
+      </div>` : ''}
+
     <p class="tiny" style="margin-top:8px">Per 18 holes, so nines sit on the same scale. Higher is better; the dashed line is ${
-      key === 'toPar' ? 'level par (shown inverted, so up is still better)' : 'tour average'
-    }.${excluded ? ` ${excluded} score-only round${excluded === 1 ? '' : 's'} left out — switch to Score to include ${excluded === 1 ? 'it' : 'them'}.` : ''}</p>
+      key === 'toPar' ? 'level par (shown inverted, so up is still better)' : `${esc(benchName())} average`
+    }.${smoothOn ? ` The heavy line is a trailing ${smoothWindow}-round average — one good putting day moves the faint line more than a month of improvement does.` : ''}${
+      excluded ? ` ${excluded} score-only round${excluded === 1 ? '' : 's'} left out — switch to Score to include ${excluded === 1 ? 'it' : 'them'}.` : ''}</p>
   </div>`;
 }
 
@@ -1407,7 +1966,28 @@ function renderPuttingCard(putts) {
  * single round is a much smaller sample than a career, and the card
  * should say so where that applies.
  */
-function renderHandicapCard(profile, { subtitle, caveat } = {}) {
+function renderHandicapCard(profile, { subtitle, caveat, implied } = {}) {
+  /*
+   * "Plays like" comes from one of two places, and the card says
+   * which. When there are enough shots, it is SOLVED from them: the
+   * handicap level at which that part of the game would have come out
+   * level, given where the ball actually was. When there are not, it
+   * falls back to the fixed category shares — a description of golfers
+   * in general rather than of this one — and is marked with a degree
+   * sign so a modelled figure never passes as a measured one.
+   */
+  const impliedFor = (category) => {
+    if (!implied) return null;
+    const row = implied.rows.find((r) => r.category === category);
+    if (!row || row.handicap == null || row.thin) return null;
+    return row;
+  };
+
+  const anySolved = profile.rows.some((row) => impliedFor(row.category));
+  const thinRows = implied
+    ? implied.rows.filter((r) => r.thin || r.handicap == null)
+    : [];
+
   return `<div class="card">
     <h2>${profile.overall <= 0.5 ? 'You play like scratch' : `You play like a ${fmtHandicap(profile.overall)}`}</h2>
     ${subtitle ? `<p class="muted">${subtitle}</p>` : ''}
@@ -1418,24 +1998,30 @@ function renderHandicapCard(profile, { subtitle, caveat } = {}) {
         <span style="text-align:center">Plays like</span>
         <span style="text-align:center">Upside</span>
       </div>
-      ${profile.rows.map((row) => `
-        <div class="line" style="grid-template-columns:1fr 56px 62px 58px">
+      ${profile.rows.map((row) => {
+        const solved = impliedFor(row.category);
+        const level = solved ? solved.handicap : row.handicap;
+        // The read on strong or weak is relative to the rest of the
+        // game either way, so it follows whichever figure is shown.
+        const gap = profile.overall - level;
+        return `<div class="line" style="grid-template-columns:1fr 56px 62px 58px">
           <span>
             <strong>${CATEGORY_LABELS[row.category]}</strong>
             <span class="tiny">${
-              row.gapToOverall < -1 ? 'holding you back'
-              : row.gapToOverall > 1 ? 'ahead of the rest'
+              gap < -1 ? 'holding you back'
+              : gap > 1 ? 'ahead of the rest'
               : 'in line with the rest'
-            }</span>
+            }${solved ? ` &middot; ${solved.shots} shots` : ''}</span>
           </span>
           <span class="mono ${sgClass(row.sg)}" style="text-align:center;font-size:12px">${fmtSG(row.sg)}</span>
           <span class="mono" style="text-align:center;font-size:13px;font-weight:700;color:${
-            row.gapToOverall < -1 ? 'var(--flag)' : row.gapToOverall > 1 ? 'var(--green-mid)' : 'var(--ink-soft)'
-          }">${fmtHandicap(row.handicap)}</span>
+            gap < -1 ? 'var(--flag)' : gap > 1 ? 'var(--green-mid)' : 'var(--ink-soft)'
+          }">${solved ? esc(fmtImpliedShort(solved)) : fmtHandicapShort(row.handicap) + "&deg;"}</span>
           <span class="mono tiny" style="text-align:center">${
             upsideFor(row) >= 0.1 ? '−' + upsideFor(row).toFixed(1) : '—'
           }</span>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>
     <p class="tiny" style="margin-top:10px">
       <strong>Upside</strong> is the strokes per 18 saved by lifting that part of the game to the level of the rest &mdash; not to scratch, just to your own standard.
@@ -1443,7 +2029,22 @@ function renderHandicapCard(profile, { subtitle, caveat } = {}) {
         ? ` Here that is <strong>${CATEGORY_LABELS[profile.weakest.category]}</strong>, worth about ${upsideFor(profile.weakest).toFixed(1)} shots.`
         : ' Fairly even across the board.'}
     </p>
-    <p class="tiny">${caveat || 'The handicap conversion is a model, not a measurement. It is anchored on scoring, which is solid; the split between categories is approximate. Good for spotting the weak spot, not for arguing over a decimal.'}</p>
+    ${implied ? `<p class="tiny"><strong>Plays like</strong> is solved from your own shots over the last ${
+      implied.rounds
+    } round${implied.rounds === 1 ? '' : 's'}: the standard at which that part of the game would have come out level, given where the ball actually finished.${
+      implied.weakest ? ` The weakest is <strong>${CATEGORY_LABELS[implied.weakest.category]}</strong>, playing like ${esc(fmtImplied(implied.weakest))}.` : ''
+    }${
+      profile.rows.some((r) => { const s = impliedFor(r.category); return s && s.belowRange; })
+        ? ' A figure written with a plus, as on a scorecard, is better than scratch.' : ''
+    }${
+      thinRows.length ? ` ${thinRows.map((r) => CATEGORY_LABELS[r.category]).join(' and ')} ${
+        thinRows.length === 1 ? 'has' : 'have'
+      } under ${MIN_CATEGORY_SHOTS} shots in that window, so ${
+        thinRows.length === 1 ? 'it falls' : 'they fall'
+      } back to the model &mdash; marked &deg;.` : ''}${
+      !anySolved ? ' Nothing has enough shots yet, so every figure here is modelled.' : ''
+    }</p>` : ''}
+    <p class="tiny">${caveat || 'The total is anchored on scoring, which is solid. A per-category figure marked &deg; is the general model rather than your shots, and is indicative — good for spotting the weak spot, not for arguing over a decimal.'}</p>
   </div>`;
 }
 
@@ -1543,7 +2144,7 @@ function renderGappingCard(clubs) {
 
 /** Holes that keep costing, and holes that keep giving. */
 function renderNemesisCard(rounds) {
-  const { worst, best, considered } = nemesisHoles(rounds, { minPlays: 2, count: 3 });
+  const { worst, best, considered } = nemesisHoles(rounds, { minPlays: 2, count: 3, baseline: bench() });
   if (!worst.length) {
     return considered === 0 && rounds.length ? `<div class="card">
       <h2>Hole by hole</h2>
@@ -1597,6 +2198,12 @@ function renderApproachCard(buckets) {
   return `<div class="card">
     <h2>Approach play</h2>
     <p class="muted">Strokes gained and average proximity by distance. Approach starts at 30 yards &mdash; anything closer counts as short game.</p>
+    ${/*
+       The chart says which yardage is bleeding shots; the rows below
+       carry the proximity and the counts, which a chart cannot hold
+       without becoming three charts.
+    */''}
+    ${approachByDistanceChart(buckets, { thinBelow: THIN_SAMPLE, label: benchName() })}
     ${buckets.map((b) => `
       <div class="row" style="${thinStyle(b.shots)}">
         <div class="badge" style="font-size:11px">${esc(b.label)}</div>
@@ -1608,7 +2215,7 @@ function renderApproachCard(buckets) {
         </div>
         <div class="row-val ${sgClass(b.sg / b.shots)}">${fmtSG(b.sg / b.shots)}</div>
       </div>`).join('')}
-    <p class="tiny" style="margin-top:8px">Per-shot average. The bucket costing most per swing is where practice pays${
+    <p class="tiny" style="margin-top:8px">Bars and figures are the per-shot average, with the number of shots under each band. The bucket costing most per swing is where practice pays${
       thin ? `, but ${thin === 1 ? 'the faded row has' : 'faded rows have'} under ${THIN_SAMPLE} shots &mdash; not enough to trust yet` : ''
     }.</p>
   </div>`;
@@ -1620,7 +2227,7 @@ function renderBestsCard(bests, allRounds) {
 
   // Best round is about scoring, so a score-only round is eligible
   // even though it can contribute to nothing else here.
-  const scoringBest = personalBests(allRounds || []).bestRound;
+  const scoringBest = personalBests(allRounds || [], bench()).bestRound;
   if (scoringBest && (!bests.bestRound || scoringBest.toPar < bests.bestRound.toPar)) {
     bests = { ...bests, bestRound: scoringBest };
   }
@@ -1678,16 +2285,52 @@ function renderMissCard(title, stats) {
   const { tally, total } = stats;
   if (!total) return '';
 
+  /*
+   * Two readings of the same nine cells. Frequency says where the ball
+   * goes; cost says whether it matters. They are genuinely different
+   * pictures — a miss you make constantly that costs nothing is not
+   * the miss to work on, and the frequency grid alone cannot say so.
+   */
+  const byCost = STATE.missMode === 'cost';
+
+  /*
+   * Shading in the cost view is relative to the worst direction, with
+   * a floor under it. Without the floor, a set of misses that between
+   * them cost three hundredths of a shot would still paint one cell
+   * bright red for being the worst of a harmless bunch — technically
+   * true, and a completely wrong impression.
+   */
+  const worstCost = Math.max(0.15, ...MISS_GRID.flat().map((dir) => {
+    const count = tally[dir] || 0;
+    return count ? Math.abs(Math.min(0, (stats.sgByDir[dir] || 0) / count)) : 0;
+  }));
+
   const cells = MISS_GRID.flat().map((dir) => {
     const count = tally[dir] || 0;
     const share = total ? Math.round((count / total) * 100) : 0;
-    const strength = count ? Math.min(0.14 + (count / total) * 1.1, 1) : 0;
-    const style = count
-      ? `background:rgba(62,107,87,${strength.toFixed(2)});border-color:var(--green-mid)`
+    const avg = count ? (stats.sgByDir[dir] || 0) / count : 0;
+
+    // A direction that gains gets no tint at all. Giving it the faint
+    // baseline wash every other cell starts from would have it read as
+    // mildly costly, which is the opposite of what it is.
+    const strength = !count || (byCost && avg >= 0) ? 0
+      : byCost
+        ? Math.min(0.14 + (Math.abs(avg) / worstCost) * 1.05, 1)
+        : Math.min(0.14 + (count / total) * 1.1, 1);
+    // Cost shades in the flag colour, frequency in green, so the two
+    // views are never mistaken for each other at a glance.
+    const rgb = byCost ? '168,57,31' : '62,107,87';
+    const style = strength
+      ? `background:rgba(${rgb},${strength.toFixed(2)});border-color:${byCost ? 'var(--flag)' : 'var(--green-mid)'}`
       : '';
+
     return `<div class="miss-cell ${dir === 'target' ? 'center' : ''}" style="${style}"
       title="${esc(MISS_LABELS[dir])}">
-      ${count ? `<span><strong class="mono">${count}</strong><br><span class="tiny">${share}%</span></span>` : '&middot;'}
+      ${count
+        ? `<span><strong class="mono">${byCost ? fmtSG(avg) : count}</strong><br><span class="tiny">${
+            byCost ? `${count} shot${count === 1 ? '' : 's'}` : `${share}%`
+          }</span></span>`
+        : '&middot;'}
     </div>`;
   }).join('');
 
@@ -1705,7 +2348,15 @@ function renderMissCard(title, stats) {
 
   return `<div class="card">
     <h2>${esc(title)}</h2>
-    <p class="muted">${total} logged. Centre is on target; darker means more often.</p>
+    <p class="muted">${total} logged. Centre is on target; darker means ${
+      byCost ? 'more costly per shot' : 'more often'
+    }.</p>
+    <div class="chip-grid g2" style="gap:6px">
+      <button class="chip ${byCost ? '' : 'active'}" data-miss-mode="count"
+              style="padding:7px 0;font-size:11px;min-height:36px">How often</button>
+      <button class="chip ${byCost ? 'active' : ''}" data-miss-mode="cost"
+              style="padding:7px 0;font-size:11px;min-height:36px">What it costs</button>
+    </div>
     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
       <div class="miss-grid" style="flex:0 0 auto;margin:0;width:190px">${cells}</div>
       <div style="flex:1 1 150px;min-width:140px">
@@ -1817,7 +2468,7 @@ function screenClubhouse() {
       </div></div>`;
   }
 
-  const summaries = players.map((p) => playerSummary(p, all));
+  const summaries = players.map((p) => playerSummary(p, all, bench()));
   const cols = `minmax(96px,1.3fr) repeat(${players.length}, minmax(58px,1fr))`;
 
   const leaderOf = (metric) => {
@@ -1887,12 +2538,12 @@ function screenClubhouse() {
 function renderSharedHoles(allRounds, players) {
   const perPlayer = players.map((player) => {
     const theirs = allRounds.filter((r) => r.player === player);
-    const { worst } = nemesisHoles(theirs, { minPlays: 2, count: 1 });
+    const { worst } = nemesisHoles(theirs, { minPlays: 2, count: 1, baseline: bench() });
     return { player, hole: worst[0] || null };
   }).filter((row) => row.hole);
 
   // Holes at least two people have played more than once.
-  const shared = holeRecords(allRounds)
+  const shared = holeRecords(allRounds, bench())
     .filter((r) => r.plays >= 3)
     .sort((a, b) => a.avgSG - b.avgSG)
     .slice(0, 3);
@@ -2133,6 +2784,9 @@ const SCREENS = {
   history: screenHistory,
   detail: screenDetail,
   settings: screenSettings,
+  calendar: screenCalendar,
+  teeTime: screenTeeTime,
+  teeTimeEdit: screenTeeTimeEdit,
   stats: screenStats,
   clubhouse: screenClubhouse,
   courses: screenCourses,
@@ -2192,6 +2846,24 @@ function bindLiveInputs() {
   const importBox = document.getElementById('importBox');
   if (importBox) {
     importBox.oninput = (e) => { STATE.importText = e.target.value; };
+  }
+
+  // The tee time form's free-text fields. Same reasoning as the
+  // distance field: re-rendering per keystroke would drop focus and
+  // shut the keyboard mid-word.
+  const ttDate = document.getElementById('ttDate');
+  if (ttDate) {
+    ttDate.onchange = (e) => { STATE.teeTimeDraft.date = e.target.value; };
+  }
+
+  const ttTime = document.getElementById('ttTime');
+  if (ttTime) {
+    ttTime.onchange = (e) => { STATE.teeTimeDraft.time = e.target.value; };
+  }
+
+  const ttNotes = document.getElementById('ttNotes');
+  if (ttNotes) {
+    ttNotes.oninput = (e) => { STATE.teeTimeDraft.notes = e.target.value; };
   }
 
   const courseCity = document.getElementById('courseCity');
@@ -2604,6 +3276,81 @@ function exportCard(round) {
 }
 
 /**
+ * Hand off tee times as a calendar file.
+ *
+ * iOS recognises text/calendar and offers to add the events. The UID
+ * on each event is the tee time's own id, so exporting twice updates
+ * what is already in the calendar rather than duplicating it.
+ */
+function exportCalendar(teeTimes, name) {
+  if (!teeTimes.length) {
+    STATE.error = 'Nothing to add to the calendar.';
+    return render();
+  }
+  download(toICS(teeTimes), name, 'text/calendar');
+  STATE.notice = teeTimes.length === 1
+    ? 'Calendar file ready. Open it to add the tee time.'
+    : `Calendar file ready with ${teeTimes.length} entries. Open it to add them.`;
+  render();
+}
+
+/**
+ * Begin the round that was booked, with the course, tees, layout and
+ * group id already filled in.
+ *
+ * The group id is the whole point: it is what lets four separately
+ * written rounds be recognised afterwards as one game.
+ */
+function startScheduledRound(teeTimeId) {
+  const teeTime = store.getTeeTime(teeTimeId);
+  if (!teeTime) return;
+
+  const course = teeTime.courseId ? safeCourse(teeTime.courseId) : null;
+  if (!course) {
+    STATE.error = 'That course is not saved on this phone, so the round has to be started from Play.';
+    return render();
+  }
+
+  const tee = teeTime.teeName || course.teeNames[0];
+  const option = (teeTime.layoutKey && findPlayOption(course, teeTime.layoutKey))
+    || playOptions(course)[0];
+  if (!option) {
+    STATE.error = 'That course has no playable nine on this phone.';
+    return render();
+  }
+
+  const problems = [];
+  option.nineIds.forEach((id) => {
+    const nine = course.nines.find((n) => n.id === id);
+    if (nine) problems.push(...validateNine(nine, tee));
+  });
+  if (problems.length) {
+    STATE.error = problems[0] + ' Fix the scorecard before starting.';
+    return render();
+  }
+
+  STATE.round = newRound({
+    player: STATE.player,
+    courseId: course.id,
+    courseName: course.name,
+    teeName: tee,
+    layout: option.label,
+    holes: buildRoundHoles(course, option, tee),
+    mode: 'full',
+    groupId: teeTime.groupId,
+  });
+  STATE.holeIdx = 0;
+  STATE.draft = {};
+  store.saveActiveRound(STATE.round);
+
+  // The tee time has served its purpose; marking it played keeps it
+  // out of tomorrow's banner without deleting the record of it.
+  store.saveTeeTime({ ...teeTime, status: 'played' });
+  go('play');
+  sync.syncInBackground(null, { force: true });
+}
+
+/**
  * Runs a sync operation with the button disabled and the outcome
  * reported inline. Nothing here is on a path the user has to wait
  * for — the data is already safe locally before any of it runs.
@@ -2629,6 +3376,138 @@ async function runSync(label, operation) {
 
 const ACTIONS = {
   'goto-settings': () => go('settings', { syncDraft: null, archive: null }),
+
+  /* --- Calendar ------------------------------------------------- */
+
+  'goto-calendar': () => go('calendar', { teeTimeDraft: null }),
+  'cal-today': () => go('calendar', { calYear: null, calMonth: null, calDay: todayKey() }),
+
+  'new-tee-time': (el) => {
+    const date = el.getAttribute('data-date') || todayKey();
+    go('teeTimeEdit', {
+      teeTimeDraft: {
+        id: null,
+        kind: 'round',
+        date,
+        time: '',
+        courseId: null,
+        courseName: '',
+        teeName: null,
+        layoutKey: null,
+        holes: null,
+        practiceType: null,
+        invitees: [],
+        notes: '',
+      },
+    });
+  },
+
+  'edit-tee-time': (el) => {
+    const teeTime = store.getTeeTime(el.getAttribute('data-id'));
+    if (!teeTime) return;
+    go('teeTimeEdit', { teeTimeDraft: { ...teeTime, invitees: [...(teeTime.invitees || [])] } });
+  },
+
+  'save-tee-time': () => {
+    const draft = STATE.teeTimeDraft;
+    if (!draft) return;
+
+    if (!draft.date) {
+      STATE.error = 'Pick a date first.';
+      return render();
+    }
+    if (!isValidTime(draft.time)) {
+      STATE.error = 'That time does not look right. Use the time picker, or leave it blank.';
+      return render();
+    }
+    if (draft.kind === 'round' && !draft.courseId && !draft.courseName) {
+      STATE.error = 'Pick a course, or switch this to practice.';
+      return render();
+    }
+
+    const existing = draft.id ? store.getTeeTime(draft.id) : null;
+    const course = draft.courseId ? safeCourse(draft.courseId) : null;
+
+    const teeTime = existing
+      ? {
+        ...existing,
+        kind: draft.kind,
+        date: draft.date,
+        time: draft.time || '',
+        courseId: draft.courseId || null,
+        courseName: course ? course.name : (draft.courseName || ''),
+        teeName: draft.teeName || null,
+        layoutKey: draft.layoutKey || null,
+        holes: draft.holes || null,
+        practiceType: draft.kind === 'practice' ? (draft.practiceType || null) : null,
+        invitees: cleanInvitees(draft.invitees, existing.owner),
+        notes: draft.notes || '',
+      }
+      : newTeeTime({
+        owner: STATE.player,
+        invitees: draft.invitees,
+        date: draft.date,
+        time: draft.time,
+        courseId: draft.courseId,
+        courseName: course ? course.name : draft.courseName,
+        teeName: draft.teeName,
+        layoutKey: draft.layoutKey,
+        holes: draft.holes,
+        kind: draft.kind,
+        practiceType: draft.practiceType,
+        notes: draft.notes,
+      });
+
+    store.saveTeeTime(teeTime);
+    go('calendar', {
+      teeTimeDraft: null,
+      calDay: teeTime.date,
+      notice: existing ? 'Tee time updated.' : 'Added to the diary.',
+    });
+    sync.syncInBackground(null, { force: true });
+  },
+
+  'view-tee-time': (el) => go('teeTime', { viewTeeTimeId: el.getAttribute('data-id') }),
+
+  'cancel-tee-time': (el) => {
+    const teeTime = store.getTeeTime(el.getAttribute('data-id'));
+    if (!teeTime) return;
+    store.saveTeeTime({ ...teeTime, status: 'cancelled' });
+    go('teeTime', { notice: 'Marked as cancelled.' });
+    sync.syncInBackground(null, { force: true });
+  },
+
+  'uncancel-tee-time': (el) => {
+    const teeTime = store.getTeeTime(el.getAttribute('data-id'));
+    if (!teeTime) return;
+    store.saveTeeTime({ ...teeTime, status: 'scheduled' });
+    go('teeTime', { notice: 'Back on.' });
+    sync.syncInBackground(null, { force: true });
+  },
+
+  'delete-tee-time': (el) => {
+    if (!confirm('Remove this from everyone’s diary?')) return;
+    store.deleteTeeTime(el.getAttribute('data-id'));
+    go('calendar', { viewTeeTimeId: null, notice: 'Removed.' });
+    sync.syncInBackground(null, { force: true });
+  },
+
+  'start-scheduled': (el) => startScheduledRound(el.getAttribute('data-id')),
+
+  'export-tee-time': (el) => {
+    const teeTime = store.getTeeTime(el.getAttribute('data-id'));
+    if (!teeTime) return;
+    exportCalendar([teeTime], `ledger-${teeTime.date}.ics`);
+  },
+
+  'export-calendar': () => {
+    // The same set the Coming up list shows, so the button does what
+    // the card above it says. A tee time already played is not an
+    // upcoming entry, whatever its date says.
+    const today = todayKey();
+    const upcoming = visibleSchedule().filter((t) => t.date >= today && t.status === 'scheduled');
+    exportCalendar(upcoming, 'ledger-tee-times.ics');
+  },
 
   'save-sync-config': () => {
     const draft = syncDraft();
@@ -3004,8 +3883,101 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window]');
   if (!target) return;
+
+  const benchmark = target.getAttribute('data-benchmark');
+  if (benchmark) {
+    store.setBenchmark(benchmark);
+    return render();
+  }
+
+  const missMode = target.getAttribute('data-miss-mode');
+  if (missMode) { STATE.missMode = missMode; return render(); }
+
+  const hcpWindow = target.getAttribute('data-hcp-window');
+  if (hcpWindow) {
+    store.setPref('handicapWindow', Number(hcpWindow));
+    return render();
+  }
+
+  const smooth = target.getAttribute('data-smooth');
+  if (smooth) { STATE.trendSmooth = smooth === 'on'; return render(); }
+
+  /* --- Calendar and the tee time form ---------------------------- */
+
+  const calStep = target.getAttribute('data-cal-step');
+  if (calStep) {
+    const { year, month } = calendarCursor();
+    const moved = new Date(year, month + Number(calStep), 1);
+    STATE.calYear = moved.getFullYear();
+    STATE.calMonth = moved.getMonth();
+    // Closing the open day avoids a detail card describing a day the
+    // grid above is no longer showing.
+    STATE.calDay = null;
+    return render();
+  }
+
+  const calDay = target.getAttribute('data-cal-day');
+  if (calDay !== null) {
+    STATE.calDay = (calDay && STATE.calDay !== calDay) ? calDay : null;
+    return render();
+  }
+
+  const ttKind = target.getAttribute('data-tt-kind');
+  if (ttKind) {
+    STATE.teeTimeDraft.kind = ttKind;
+    return render();
+  }
+
+  const ttPractice = target.getAttribute('data-tt-practice');
+  if (ttPractice) {
+    const draft = STATE.teeTimeDraft;
+    draft.practiceType = draft.practiceType === ttPractice ? null : ttPractice;
+    return render();
+  }
+
+  const ttCourse = target.getAttribute('data-tt-course');
+  if (ttCourse) {
+    const draft = STATE.teeTimeDraft;
+    // Switching course invalidates the tee and the layout, which
+    // belong to the old one and would otherwise silently survive.
+    if (draft.courseId !== ttCourse) {
+      draft.courseId = ttCourse;
+      draft.teeName = null;
+      draft.layoutKey = null;
+      draft.holes = null;
+      const course = safeCourse(ttCourse);
+      draft.courseName = course ? course.name : '';
+      if (course && course.teeNames.length === 1) draft.teeName = course.teeNames[0];
+    }
+    return render();
+  }
+
+  const ttTee = target.getAttribute('data-tt-tee');
+  if (ttTee) {
+    STATE.teeTimeDraft.teeName = ttTee;
+    return render();
+  }
+
+  const ttLayout = target.getAttribute('data-tt-layout');
+  if (ttLayout) {
+    const draft = STATE.teeTimeDraft;
+    const same = draft.layoutKey === ttLayout;
+    draft.layoutKey = same ? null : ttLayout;
+    draft.holes = same ? null : Number(target.getAttribute('data-holes')) || null;
+    return render();
+  }
+
+  const ttInvite = target.getAttribute('data-tt-invite');
+  if (ttInvite) {
+    const draft = STATE.teeTimeDraft;
+    const list = draft.invitees || [];
+    draft.invitees = list.includes(ttInvite)
+      ? list.filter((n) => n !== ttInvite)
+      : list.concat([ttInvite]);
+    return render();
+  }
 
   const verified = target.getAttribute('data-verified');
   if (verified !== null) {
@@ -3202,7 +4174,7 @@ function init() {
 
 /** Re-render after a background sync, but never mid shot-entry. */
 function refreshIfIdle(result) {
-  if (!result || (!result.pulled && !result.pushed)) return;
+  if (!result || (!result.pulled && !result.pushed && !result.teeTimes)) return;
   if (STATE.screen === 'play' || STATE.screen === 'courseEdit') return;
   render();
 }
