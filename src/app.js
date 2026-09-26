@@ -183,7 +183,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26i';
+const BUILD = '2026-09-26j';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -3039,136 +3039,326 @@ const COMPARE_SECTIONS = [
   },
 ];
 
+/* --- Clubhouse -----------------------------------------------------
+   Two views. Field: the season table and where everybody sits on
+   each part of the game. Head to head: you against one other player,
+   part by part. "Plays like" — the handicap that normally plays a
+   part of the game that well — is the headline number throughout,
+   because it is the scale golfers already think in.
+------------------------------------------------------------------ */
+
+/**
+ * Each player's marker: a circle with an initial, told apart by fill
+ * as well as colour — you solid in the gain colour, then solid ink,
+ * then outline, then dashed outline, then solid loss colour.
+ */
+function playerMarkers(players) {
+  const others = players.filter((p) => p !== STATE.player).sort();
+  const order = players.includes(STATE.player) ? [STATE.player, ...others] : others;
+  const styles = ['me', 'solid', 'outline', 'dashed', 'loss'];
+  const initials = new Map();
+  order.forEach((p) => {
+    let tag = String(p).charAt(0).toUpperCase();
+    // Two players with the same initial get two letters each.
+    if (order.some((q) => q !== p && String(q).charAt(0).toUpperCase() === tag)) tag = String(p).slice(0, 2);
+    initials.set(p, tag);
+  });
+  const map = new Map();
+  order.forEach((p, i) => map.set(p, { initial: initials.get(p), style: styles[i % styles.length] }));
+  return map;
+}
+
+function markerHtml(marker, extra = '') {
+  return `<span class="pmark pm-${marker.style}" ${extra}>${esc(marker.initial)}</span>`;
+}
+
 function screenClubhouse() {
   const all = store.getRounds();
   const players = [...new Set(all.map((r) => r.player))].filter(Boolean).sort();
+  const view = STATE.clubView === 'h2h' ? 'h2h' : 'field';
+
+  const head = `<header class="topbar">
+      <div class="brand">Clubhouse</div>
+      <div class="sub">${all.length} round${all.length === 1 ? '' : 's'} &middot; vs tour</div>
+    </header>`;
 
   if (players.length === 0) {
-    return `${topbar('Clubhouse')}
-      <div class="card"><div class="empty">
-        <div class="glyph">&#127948;</div>
-        <div>Nobody has logged a round yet.</div>
-      </div></div>`;
+    return `${head}
+      <div class="card"><div class="empty">Nobody has logged a round yet.</div></div>`;
   }
 
-  const summaries = players.map((p) => playerSummary(p, all, bench()));
-  const cols = `minmax(96px,1.3fr) repeat(${players.length}, minmax(58px,1fr))`;
+  const markers = playerMarkers(players);
 
-  const leaderOf = (metric) => {
-    if (!metric.better) return null;
-    let best = null;
-    summaries.forEach((s) => {
-      const v = metric.get(s);
-      if (v == null) return;
-      if (best === null) { best = { player: s.player, v }; return; }
-      const wins = metric.better === 'higher' ? v > best.v : v < best.v;
-      if (wins) best = { player: s.player, v };
-    });
-    // A leader nobody is competing with is not a leader.
-    const contenders = summaries.filter((s) => metric.get(s) != null).length;
-    return contenders > 1 && best ? best.player : null;
-  };
-
-  return `${topbar('Clubhouse')}
+  return `${head}
     ${notices()}
-    ${renderStandings(all)}
-    <div class="card">
-      <h2>Everyone</h2>
-      <p class="muted">${players.length} player${players.length === 1 ? '' : 's'}, ${all.length} round${all.length === 1 ? '' : 's'} between them. The leader in each row is marked.</p>
-      <div style="overflow-x:auto">
-        <div style="min-width:${100 + players.length * 62}px">
-          <div class="card-editor">
-            <div class="hdr" style="grid-template-columns:${cols}">
-              <span></span>
-              ${summaries.map((s) => `<span style="text-align:center">${esc(s.player)}</span>`).join('')}
-            </div>
-            ${COMPARE_SECTIONS.map((section) => `
-              <div class="line" style="grid-template-columns:1fr;border-bottom:none;padding-top:12px">
-                <span><strong style="font-size:13px">${section.title}</strong>
-                  ${section.note ? `<span class="tiny">${section.note}</span>` : ''}</span>
-              </div>
-              ${section.metrics.map((metric) => {
-                const leader = leaderOf(metric);
-                return `<div class="line" style="grid-template-columns:${cols}">
-                  <span class="tiny" style="font-weight:600">${metric.label}</span>
-                  ${summaries.map((s) => {
-                    const v = metric.get(s);
-                    const isLeader = leader === s.player;
-                    return `<span class="mono" style="text-align:center;font-size:${metric.strong ? '13px' : '12px'};font-weight:${isLeader || metric.strong ? 700 : 500};color:${
-                      v == null ? 'var(--ink-faint)'
-                        : isLeader ? 'var(--green-mid)'
-                        : 'var(--ink)'
-                    }">${v == null ? '&ndash;' : metric.fmt(v)}</span>`;
-                  }).join('')}
-                </div>`;
-              }).join('')}
-            `).join('')}
-          </div>
-        </div>
-      </div>
+    <div class="seg" role="tablist" style="margin-top:14px">
+      <button role="tab" aria-selected="${view === 'field'}" class="${view === 'field' ? 'active' : ''}" data-action="club-view" data-view="field">Field</button>
+      <button role="tab" aria-selected="${view === 'h2h'}" class="${view === 'h2h' ? 'active' : ''}" data-action="club-view" data-view="h2h">Head to head</button>
     </div>
-
-    ${renderClubhouseNotes(summaries)}
-    ${renderSharedHoles(all, players)}`;
+    ${view === 'field'
+      ? `${renderStandings(all, markers)}${renderWhoPlaysWhat(all, players, markers)}${renderSharedHoles(all, players)}`
+      : renderHeadToHead(all, players, markers)}`;
 }
 
 /**
- * The season table: who is winning, on strokes gained per 18, with
- * the leader in each part of the game underneath.
+ * The season table, ranked on strokes gained per 18 against tour and
+ * shown as the handicap that plays like — the same order either way.
  */
-function renderStandings(allRounds) {
+function renderStandings(allRounds, markers) {
   const scope = STATE.standingsScope === 'recent' ? 'recent' : 'season';
-  const { rows, minRounds, leaders } = standings(allRounds, { scope, baseline: bench() });
-  const cols = 'grid-template-columns:26px minmax(0,1fr) 36px 52px 58px';
+  const { rows, minRounds } = standings(allRounds, { scope, baseline: 'tour' });
   const year = new Date().getFullYear();
 
-  const moveText = (row) => {
+  const bestOf = (player) => {
+    const theirs = allRounds.filter((r) => r.player === player && playedHoles(r).length >= 18);
+    if (!theirs.length) return null;
+    return Math.min(...theirs.map(roundToPar));
+  };
+  const move = (row) => {
     if (scope !== 'season' || !row.rank) return '';
-    if (row.move == null) return 'new';
-    if (row.move > 0) return `&#9650; ${row.move}`;
-    if (row.move < 0) return `&#9660; ${-row.move}`;
-    return 'no change';
+    if (row.move == null) return ' &middot; NEW';
+    if (row.move > 0) return ` &middot; &#9650;${row.move}`;
+    if (row.move < 0) return ` &middot; &#9660;${-row.move}`;
+    return '';
   };
 
   const body = rows.length ? rows.map((row) => {
-    const lead = row.rank === 1;
-    return `<div style="display:grid;gap:0 8px;border-bottom:1px solid var(--green-line);${cols};align-items:center;padding:12px 0;${lead ? 'background:var(--flag-wash);margin:0 -8px;padding-left:8px;padding-right:8px;' : ''}${row.qualified ? '' : 'opacity:0.6;'}">
-      <span class="display" style="font-size:20px;${lead ? 'color:var(--flag)' : ''}">${row.rank || '&ndash;'}</span>
-      <div>
-        <div style="font-weight:600">${esc(row.player)}${row.player === STATE.player ? ' <span class="tiny">you</span>' : ''}</div>
-        <div class="tiny">${row.qualified ? moveText(row) : `${minRounds - row.shotRounds} more to qualify`}</div>
+    const plays = row.sg ? handicapForTotal(row.sg.total) : null;
+    const best = bestOf(row.player);
+    const details = [
+      `${row.rounds} RD${row.rounds === 1 ? '' : 'S'}`,
+      row.toParPer18 == null ? null : `${fmtToPar(Math.round(row.toParPer18))}/18`,
+      best == null ? null : `BEST ${fmtToPar(best)}`,
+    ].filter(Boolean).join(' &middot; ');
+    return `<div class="stand-row${row.qualified ? '' : ' is-short'}">
+      <span class="stand-rank">${row.rank || '&ndash;'}</span>
+      ${markerHtml(markers.get(row.player) || { initial: '?', style: 'outline' })}
+      <div class="stand-name">
+        <div class="serif-name">${esc(row.player)}</div>
+        <div class="stand-meta">${row.qualified ? details + move(row) : `${minRounds - row.shotRounds} MORE TO QUALIFY`}</div>
       </div>
-      <span class="mono" style="text-align:right">${row.rounds}</span>
-      <span class="mono" style="text-align:right">${row.toParPer18 == null ? '&ndash;' : fmtToPar(Math.round(row.toParPer18 * 10) / 10)}</span>
-      <span class="mono ${row.sg ? sgClass(row.sg.total) : ''}" style="text-align:right;font-weight:600">${row.sg ? fmtSG(row.sg.total).replace(/(\.\d)\d$/, '$1') : '&ndash;'}</span>
+      <div class="stand-plays">
+        <div class="eyebrow" style="font-size:9px">Plays like</div>
+        <div class="stand-num ${row.rank === 1 ? 'sg-pos' : ''}">${plays == null ? '&ndash;' : esc(fmtHandicapShort(plays))}</div>
+      </div>
     </div>`;
   }).join('') : `<p class="muted" style="margin-top:12px">No rounds ${scope === 'season' ? `in ${year}` : 'in the last 30 days'} yet.</p>`;
 
-  return `<div class="chip-grid g2" style="margin-top:14px">
-      <button class="chip ${scope === 'season' ? 'active' : ''}" data-standings="season">${year} Season</button>
-      <button class="chip ${scope === 'recent' ? 'active' : ''}" data-standings="recent">Last 30 days</button>
-    </div>
-    <div class="card">
+  return `<div class="card" style="border-top:none;padding-top:8px">
       <div class="split">
-        <h2>Standings</h2>
-        <span class="tiny">SG per 18 &middot; vs ${esc(benchName())}</span>
+        <div class="seg seg-small">
+          <button class="${scope === 'season' ? 'active' : ''}" data-standings="season">${year}</button>
+          <button class="${scope === 'recent' ? 'active' : ''}" data-standings="recent">30 days</button>
+        </div>
+        <span class="eyebrow">Min ${minRounds} rds</span>
       </div>
-      <div class="tiny" style="display:grid;gap:0 8px;margin-top:10px;border-bottom:1px solid var(--green-line);${cols};text-transform:uppercase;letter-spacing:0.06em;padding-bottom:8px">
-        <span>#</span><span>Player</span><span style="text-align:right">Rds</span><span style="text-align:right">Avg</span><span style="text-align:right">SG</span>
+      <div style="margin-top:10px;border-top:1px solid var(--rule-strong)">${body}</div>
+    </div>`;
+}
+
+const PART_ROWS = [
+  { key: 'total', label: 'Overall', phrase: 'the whole game' },
+  { key: 'ott', label: 'Off the tee', phrase: 'the tee' },
+  { key: 'app', label: 'Approach', phrase: 'the approach' },
+  { key: 'arg', label: 'Short game', phrase: 'the short game' },
+  { key: 'putt', label: 'Putting', phrase: 'the greens' },
+];
+
+function playsLikeFor(sg, key) {
+  if (!sg) return null;
+  return key === 'total' ? handicapForTotal(sg.total) : handicapForCategory(key, sg[key]);
+}
+
+/**
+ * One scale per part of the game with every player's marker on it.
+ * Markers that would overlap lift above the line rather than hide
+ * each other.
+ */
+function renderWhoPlaysWhat(allRounds, players, markers) {
+  const mode = STATE.wpwMode === 'sg' ? 'sg' : 'plays';
+  const summaries = players
+    .map((p) => playerSummary(p, allRounds, 'tour'))
+    .filter((s) => s.sg);
+  if (summaries.length < 2) {
+    return `<div class="card">
+      <div class="eyebrow">Who plays what</div>
+      <p class="muted" style="margin-top:8px">Once a second player logs a round with shots in it, this shows where everyone sits on each part of the game.</p>
+    </div>`;
+  }
+
+  const valueOf = (s, key) => (mode === 'plays' ? playsLikeFor(s.sg, key) : s.sg[key]);
+  const allValues = summaries.flatMap((s) => PART_ROWS.map((r) => valueOf(s, r.key)));
+  const lo = mode === 'plays' ? 0 : Math.floor(Math.min(...allValues)) - 1;
+  const hi = mode === 'plays' ? 36 : Math.ceil(Math.max(...allValues, 0)) + 1;
+  // Plays like: scratch on the left, lower is better. SG: better on the right.
+  const pct = (v) => {
+    const clamped = Math.min(Math.max(v, lo), hi);
+    return ((clamped - lo) / (hi - lo)) * 100;
+  };
+
+  const scales = PART_ROWS.map((part) => {
+    const points = summaries
+      .map((s) => ({ player: s.player, value: valueOf(s, part.key) }))
+      .map((p) => ({ ...p, x: pct(p.value) }))
+      .sort((a, b) => a.x - b.x);
+    // About 24px on a phone-width scale.
+    const tiers = [];
+    points.forEach((p) => {
+      let tier = tiers.findIndex((last) => p.x - last >= 9);
+      if (tier === -1) { tier = tiers.length; tiers.push(-Infinity); }
+      tiers[tier] = p.x;
+      p.tier = tier;
+    });
+
+    const ranked = points.slice().sort((a, b) => (mode === 'plays' ? a.value - b.value : b.value - a.value));
+    const [first, second] = ranked;
+    const gap = Math.abs(first.value - second.value);
+    const gapText = mode === 'plays' ? String(Math.round(gap)) : gap.toFixed(1);
+    const note = gap < (mode === 'plays' ? 0.5 : 0.05)
+      ? 'Level'
+      : `${esc(first.player)} by ${gapText}`;
+
+    return `<div class="wpw">
+      <div class="split">
+        <span class="wpw-label">${part.label}</span>
+        <span class="wpw-note ${first.player === STATE.player && note !== 'Level' ? 'sg-pos' : ''}">${note}</span>
       </div>
-      ${body}
-      <p class="tiny" style="margin-top:10px">Ranked on strokes gained per 18, so different courses and tees compare fairly. Avg is score over par per 18. ${minRounds} rounds with shots to qualify.</p>
+      <div class="wpw-track" style="height:${16 + tiers.length * 20}px">
+        ${points.map((p) => markerHtml(markers.get(p.player), `style="left:${p.x}%;bottom:${p.tier * 20}px" title="${esc(p.player)}: ${
+          mode === 'plays' ? fmtHandicap(p.value) : fmtSG(p.value)}"`)).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="card">
+    <div class="wpw-head">
+      <span class="eyebrow">Who plays what</span>
+      <div class="seg seg-small">
+        <button class="${mode === 'plays' ? 'active' : ''}" data-action="wpw-mode" data-mode="plays">Plays like</button>
+        <button class="${mode === 'sg' ? 'active' : ''}" data-action="wpw-mode" data-mode="sg">SG/18</button>
+      </div>
     </div>
-    ${leaders ? `<div class="card">
-      <h2>Category leaders</h2>
-      <div class="stat-grid">
-        ${CATEGORIES.map((c) => `
-          <div class="stat-box" style="text-align:left">
-            <div class="lbl">${CATEGORY_LABELS[c]}</div>
-            <div style="font-weight:600;margin-top:4px">${esc(leaders[c].player)} <span class="mono ${sgClass(leaders[c].sg)}">${fmtSG(leaders[c].sg).replace(/(\.\d)\d$/, '$1')}</span></div>
+    ${scales}
+    <div class="wpw-axis">
+      ${mode === 'plays'
+        ? '<span>&larr; Scratch</span><span>Lower is better</span><span>36+</span>'
+        : `<span>${fmtSG(lo).replace(/.00$/, '')}</span><span>Higher is better</span><span>${fmtSG(hi).replace(/.00$/, '')} &rarr;</span>`}
+    </div>
+  </div>`;
+}
+
+/** You against one other player, part by part, then the scoring. */
+function renderHeadToHead(allRounds, players, markers) {
+  const me = STATE.player;
+  const others = players.filter((p) => p !== me).sort();
+  if (!players.includes(me) || !others.length) {
+    return `<div class="card"><p class="muted">Head to head needs rounds from you and at least one other player.</p></div>`;
+  }
+  const them = others.includes(STATE.h2hOpponent) ? STATE.h2hOpponent : others[0];
+  const a = playerSummary(me, allRounds, 'tour');
+  const b = playerSummary(them, allRounds, 'tour');
+
+  const picker = `<div class="split" style="margin:14px 0 4px;flex-wrap:wrap">
+      <span class="eyebrow">${esc(me)} vs</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${others.map((p) => `<button class="pill ${p === them ? 'active' : ''}" data-action="h2h-pick" data-player="${esc(p)}">${esc(p)}</button>`).join('')}
+      </div>
+    </div>`;
+
+  if (!a.sg || !b.sg) {
+    return `${picker}<div class="card"><p class="muted">${esc(!a.sg ? 'You need' : `${them} needs`)} a round with shots in it before the two games can be compared.</p></div>`;
+  }
+
+  const rows = PART_ROWS.map((part) => {
+    const left = playsLikeFor(a.sg, part.key);
+    const right = playsLikeFor(b.sg, part.key);
+    // Decided on strokes gained, which has no floor or ceiling: two
+    // players both shown as "36+" can still be a stroke apart.
+    const gained = a.sg[part.key] - b.sg[part.key];
+    const winner = Math.abs(gained) < 0.1 ? null : gained > 0 ? 'me' : 'them';
+    const width = winner ? Math.max(4, Math.min(50, (Math.abs(right - left) / 36) * 100)) : 0;
+    return { part, left, right, winner, width, gained };
+  });
+
+  // The summary counts the four parts, not the overall line.
+  const parts = rows.slice(1);
+  const mine = parts.filter((r) => r.winner === 'me');
+  const theirs = parts.filter((r) => r.winner === 'them');
+  const words = ['no', 'one', 'two', 'three', 'four'];
+  const phrases = (list) => {
+    const p = list.map((r) => r.part.phrase);
+    return p.length > 1 ? `${p.slice(0, -1).join(', ')} and ${p[p.length - 1]}` : p[0];
+  };
+  let summary;
+  if (!mine.length && !theirs.length) summary = 'Dead level across the board.';
+  else if (!theirs.length) summary = mine.length === 4 ? 'You lead every part of the game.' : `You lead on ${phrases(mine)}; level on the rest.`;
+  else if (!mine.length) summary = theirs.length === 4 ? `${them} leads every part of the game.` : `${them} leads on ${phrases(theirs)}; level on the rest.`;
+  else {
+    const lead = mine.length === theirs.length
+      ? `Split ${words[mine.length]} parts each.`
+      : mine.length > theirs.length
+        ? `You lead ${words[mine.length]} parts of the game to ${words[theirs.length]}.`
+        : `${them} leads ${words[theirs.length]} parts of the game to ${words[mine.length]}.`;
+    const theirBest = theirs.slice().sort((x, y) => x.gained - y.gained)[0];
+    const myBest = mine.slice().sort((x, y) => y.gained - x.gained)[0];
+    const owner = mine.length >= theirs.length
+      ? `${them} owns ${theirBest.part.phrase}.`
+      : `You own ${myBest.part.phrase}.`;
+    summary = `${lead} ${owner}`;
+  }
+
+  const num = (value, won, lost) => `<span class="h2h-num ${won ? 'sg-pos' : lost ? 'is-dim' : ''}">${esc(fmtHandicapShort(value))}</span>`;
+
+  const scoring = COMPARE_SECTIONS
+    .filter((s) => ['Scoring', 'The basics', 'Career bests'].includes(s.title))
+    .flatMap((s) => s.metrics)
+    .map((m) => {
+      const va = m.get(a);
+      const vb = m.get(b);
+      let win = null;
+      if (m.better && va != null && vb != null && va !== vb) {
+        win = (m.better === 'higher' ? va > vb : va < vb) ? 'me' : 'them';
+      }
+      return `<div class="h2h-stat">
+        <span class="${win === 'me' ? 'sg-pos' : ''}">${va == null ? '&ndash;' : m.fmt(va)}</span>
+        <span class="h2h-stat-label">${m.label}</span>
+        <span class="${win === 'them' ? 'sg-pos' : ''}">${vb == null ? '&ndash;' : m.fmt(vb)}</span>
+      </div>`;
+    }).join('');
+
+  return `${picker}
+    <div class="card" style="border-top:none;padding-top:6px">
+      <div class="h2h-face">
+        <div>
+          <div class="h2h-name">${esc(me)}</div>
+          <div class="eyebrow ${rows[0].winner === 'me' ? 'sg-pos' : ''}">Plays like ${esc(fmtHandicapShort(rows[0].left))}</div>
+        </div>
+        <span class="h2h-vs">vs</span>
+        <div style="text-align:right">
+          <div class="h2h-name">${esc(them)}</div>
+          <div class="eyebrow ${rows[0].winner === 'them' ? 'sg-pos' : ''}">Plays like ${esc(fmtHandicapShort(rows[0].right))}</div>
+        </div>
+      </div>
+      <p class="callout" style="margin:10px 0 4px">${esc(summary)}</p>
+      <div style="border-top:1px solid var(--rule-strong)">
+        ${rows.map((r) => `
+          <div class="h2h-row">
+            <div class="h2h-line">
+              ${num(r.left, r.winner === 'me', r.winner === 'them')}
+              <span class="h2h-part">${r.part.label}</span>
+              ${num(r.right, r.winner === 'them', r.winner === 'me')}
+            </div>
+            <div class="h2h-track" aria-hidden="true">
+              ${r.winner ? `<span class="h2h-bar" style="${r.winner === 'me' ? 'right:50%' : 'left:50%'};width:${r.width}%"></span>` : ''}
+            </div>
           </div>`).join('')}
       </div>
-    </div>` : ''}`;
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:4px">Scoring &amp; the basics</div>
+      ${scoring}
+      <p class="tiny" style="margin-top:10px">All rounds each of you has logged. Per 18 holes where it says so, so a nine compares with a full round.</p>
+    </div>`;
 }
 
 /**
@@ -3218,39 +3408,6 @@ function renderSharedHoles(allRounds, players) {
           </div>
           <div class="row-val ${sgClass(r.avgSG)}">${fmtSG(r.avgSG)}</div>
         </div>`).join('')}` : ''}
-  </div>`;
-}
-
-/** A plain-language read of who is doing what well. */
-function renderClubhouseNotes(summaries) {
-  const withSG = summaries.filter((s) => s.sg);
-  if (withSG.length < 2) {
-    return `<div class="card">
-      <p class="muted">Once a second player logs a round with shots in it, this fills in with who is strongest where.</p>
-    </div>`;
-  }
-
-  const lines = withSG.map((s) => {
-    // Each player's own best and worst part of the game, relative to
-    // the rest of their game rather than to the other players.
-    const profile = handicapProfile({ ...s.sg });
-    const strong = profile.strongest;
-    const weak = profile.weakest;
-    return `<div class="row">
-      <div class="badge">${fmtHandicapShort(profile.overall)}</div>
-      <div class="row-meta">
-        <div class="rname">${esc(s.player)}</div>
-        <div class="rsub">Strongest ${CATEGORY_LABELS[strong.category].toLowerCase()} at ${fmtHandicap(strong.handicap)}, weakest ${CATEGORY_LABELS[weak.category].toLowerCase()} at ${fmtHandicap(weak.handicap)}</div>
-      </div>
-      <div class="row-val ${sgClass(s.sg.total)}">${fmtSG(s.sg.total)}</div>
-    </div>`;
-  }).join('');
-
-  return `<div class="card">
-    <h2>Where each game stands</h2>
-    <p class="muted">Each player's handicap level, and the part of their own game that is furthest ahead and furthest behind.</p>
-    ${lines}
-    <p class="tiny" style="margin-top:8px">Strongest and weakest are measured against that player's own standard, not against each other &mdash; a 20 handicap can have a better short game than a 5 relative to the rest of what they do.</p>
   </div>`;
 }
 
@@ -4505,6 +4662,9 @@ const ACTIONS = {
   },
 
   'save-shot': () => { STATE.sheet = null; saveShot(); },
+  'club-view': (el) => { STATE.clubView = el.getAttribute('data-view'); render(); },
+  'wpw-mode': (el) => { STATE.wpwMode = el.getAttribute('data-mode'); render(); },
+  'h2h-pick': (el) => { STATE.h2hOpponent = el.getAttribute('data-player'); render(); },
   'open-sheet': (el) => { STATE.sheet = el.getAttribute('data-sheet'); render(); },
   'close-sheet': () => { STATE.sheet = null; render(); },
   // None, +1, +2, back to none: penalties are rare enough that one
