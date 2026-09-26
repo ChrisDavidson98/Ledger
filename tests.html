@@ -982,6 +982,16 @@ check('a tee time is visible to the owner and the invited, and nobody else', () 
   return null;
 });
 
+check('an invite is news only to the invited, once, and only while upcoming', () => {
+  const tt = SCH.newTeeTime({ owner: 'Chris', invitees: ['Manny'], date: '2026-10-01' });
+  if (SCH.newInvites([tt], 'manny', [], '2026-09-26').length !== 1) return 'invitee not told';
+  if (SCH.newInvites([tt], 'Chris', [], '2026-09-26').length) return 'owner told about own booking';
+  if (SCH.newInvites([tt], 'Manny', [tt.id], '2026-09-26').length) return 'seen invite shown again';
+  if (SCH.newInvites([tt], 'Manny', [], '2026-10-02').length) return 'past invite shown';
+  if (SCH.newInvites([{ ...tt, status: 'cancelled' }], 'Manny', [], '2026-09-26').length) return 'cancelled invite shown';
+  return null;
+});
+
 check('a deleted tee time is visible to nobody', () => {
   const tt = SCH.newTeeTime({ owner: 'Chris', invitees: [], date: '2026-05-01' });
   tt.deletedAt = new Date().toISOString();

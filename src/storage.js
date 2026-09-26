@@ -22,6 +22,7 @@ const KEYS = {
   teeTimeQueue: PREFIX + 'tee_time_queue',
   players: PREFIX + 'players',
   rosterSource: PREFIX + 'roster_source',
+  seenInvites: PREFIX + 'seen_invites',
 };
 
 function read(key, fallback) {
@@ -159,6 +160,23 @@ export function findInRoster(name, shared, local) {
 /** The same, against whatever this device currently holds. */
 export function lookupPlayer(name) {
   return findInRoster(name, getPlayers(), getRoster());
+}
+
+/* --- Seen invites ------------------------------------------------
+   Per player, because a phone can be handed to somebody else: one
+   person dismissing an invite should not hide another's.
+------------------------------------------------------------------ */
+
+export function getSeenInvites(player) {
+  const all = read(KEYS.seenInvites, {}) || {};
+  return all[String(player || '').toLowerCase()] || [];
+}
+
+export function markInvitesSeen(player, ids) {
+  const all = read(KEYS.seenInvites, {}) || {};
+  const key = String(player || '').toLowerCase();
+  all[key] = Array.from(new Set((all[key] || []).concat(ids)));
+  write(KEYS.seenInvites, all);
 }
 
 /* --- Preferences ------------------------------------------------- */

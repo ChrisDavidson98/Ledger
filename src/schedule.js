@@ -173,6 +173,21 @@ export function visibleTeeTimes(teeTimes, player) {
   return (teeTimes || []).filter((t) => visibleTo(t, player));
 }
 
+/**
+ * Tee times somebody else put this player on that this device has not
+ * shown them yet. Only upcoming, still-scheduled ones: an invite to
+ * something already played or called off is not news.
+ */
+export function newInvites(teeTimes, player, seenIds, today = todayKey()) {
+  const name = String(player || '').toLowerCase();
+  const seen = new Set(seenIds || []);
+  return visibleTeeTimes(teeTimes, player)
+    .filter((t) => String(t.owner).toLowerCase() !== name)
+    .filter((t) => t.status === 'scheduled' && t.date >= today)
+    .filter((t) => !seen.has(t.id))
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''));
+}
+
 /** A short line describing what the tee time actually is. */
 export function describeTeeTime(teeTime) {
   if (teeTime.kind === 'practice') return teeTime.practiceType || 'Practice';

@@ -79,6 +79,7 @@ import {
   cleanInvitees,
   playersOf,
   visibleTeeTimes,
+  newInvites,
   describeTeeTime,
   monthGrid,
   monthLabel,
@@ -179,7 +180,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-05e';
+const BUILD = '2026-09-26a';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -384,6 +385,7 @@ function screenHome() {
 
   return `${topbar(STATE.player)}
     ${notices()}
+    ${renderInviteBanner()}
     ${renderScheduleBanner()}
     ${resumable ? `
       <div class="card">
@@ -1564,6 +1566,34 @@ function renderDayCard(key, entry) {
  * Kept deliberately plain. No streak, no encouragement, no countdown —
  * it is a button that starts the round you are about to play.
  */
+/**
+ * "You've been invited" — the in-app stand-in for a push notification.
+ * Stays until dismissed or opened, so an invite that arrived in a
+ * background sync is still waiting the next time the app is looked at.
+ */
+function renderInviteBanner() {
+  const invites = newInvites(store.getLiveTeeTimes(), STATE.player, store.getSeenInvites(STATE.player));
+  if (!invites.length) return '';
+
+  return `<div class="card">
+    <h2>${invites.length === 1 ? `${esc(invites[0].owner)} invited you` : `${invites.length} new invites`}</h2>
+    ${invites.map((t) => `
+      <button class="row" data-action="open-invite" data-id="${esc(t.id)}">
+        <div class="badge" style="font-size:11px">${t.kind === 'practice' ? 'PR' : 'GO'}</div>
+        <div class="row-meta">
+          <div class="rname">${esc(describeTeeTime(t))}</div>
+          <div class="rsub">${esc(fmtDateKey(t.date))}${t.time ? ` &middot; ${esc(fmtTime(t.time))}` : ''}${
+            invites.length > 1 ? ` &middot; from ${esc(t.owner)}` : ''
+          }</div>
+        </div>
+        <div class="row-val">&rsaquo;</div>
+      </button>`).join('')}
+    <div class="btn-row">
+      <button class="btn-ghost" data-action="dismiss-invites">Got It</button>
+    </div>
+  </div>`;
+}
+
 function renderScheduleBanner() {
   // Nothing to offer while a round is already in progress.
   if (STATE.round && !isRoundComplete(STATE.round)) return '';
@@ -3698,6 +3728,18 @@ const ACTIONS = {
       notice: existing ? 'Tee time updated.' : 'Added to the diary.',
     });
     sync.syncInBackground(null, { force: true });
+  },
+
+  'open-invite': (el) => {
+    const id = el.getAttribute('data-id');
+    store.markInvitesSeen(STATE.player, [id]);
+    go('teeTime', { viewTeeTimeId: id });
+  },
+
+  'dismiss-invites': () => {
+    const invites = newInvites(store.getLiveTeeTimes(), STATE.player, store.getSeenInvites(STATE.player));
+    store.markInvitesSeen(STATE.player, invites.map((t) => t.id));
+    render();
   },
 
   'view-tee-time': (el) => go('teeTime', { viewTeeTimeId: el.getAttribute('data-id') }),
