@@ -38,6 +38,7 @@ import * as H from './src/handicap.js';
 import * as E from './src/brief.js';
 import * as SCH from './src/schedule.js';
 import * as CH from './src/charts.js';
+import * as RC from './src/recap.js';
 // Only the PURE helpers are called from here. Importing the module is
 // safe — it has no side effects at load — but nothing below may read
 // or write localStorage, or opening this page would edit real data.
@@ -989,6 +990,24 @@ check('an invite is news only to the invited, once, and only while upcoming', ()
   if (SCH.newInvites([tt], 'Manny', [tt.id], '2026-09-26').length) return 'seen invite shown again';
   if (SCH.newInvites([tt], 'Manny', [], '2026-10-02').length) return 'past invite shown';
   if (SCH.newInvites([{ ...tt, status: 'cancelled' }], 'Manny', [], '2026-09-26').length) return 'cancelled invite shown';
+  return null;
+});
+
+check('a recap names the round, all four categories, and a best hole above its worst', () => {
+  const d = RC.recapData(mediumRound());
+  if (d.course !== 'Test GC' || d.player !== 'Test') return 'wrong round';
+  if (d.categories.length !== 4) return `${d.categories.length} categories`;
+  const sum = d.categories.reduce((s, c) => s + c.sg, 0);
+  if (Math.abs(sum - d.total) > 1e-9) return 'categories do not add up to the total';
+  if (!d.best || !d.worst || d.best.sg < d.worst.sg) return 'best and worst the wrong way round';
+  return null;
+});
+
+check('a score-only recap has a score and no strokes gained', () => {
+  const d = RC.recapData(roundOf([{ par: 4, score: 5 }, { par: 3, score: 3 }], 'score'));
+  if (d.score !== 8 || d.toPar !== 1) return `score ${d.score} (${d.toPar})`;
+  if (d.total !== null || d.categories.length) return 'strokes gained on a score-only round';
+  if (d.best.hole !== 2 || d.worst.hole !== 1) return 'best/worst wrong by score';
   return null;
 });
 

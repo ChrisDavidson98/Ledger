@@ -96,6 +96,7 @@ import * as store from './storage.js';
 import * as sync from './sync.js';
 import { missingSeeds, cloneSeed } from './seed.js';
 import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js';
+import { recapData, drawRecap, shareRecap } from './recap.js';
 import { planRepair, describePlan } from './repair.js';
 import {
   handicapProfile, fmtHandicap, fmtHandicapShort, upsideFor,
@@ -180,7 +181,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26a';
+const BUILD = '2026-09-26b';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -809,10 +810,19 @@ function renderHoleComplete(hole) {
   </div>`;
 }
 
+/** At the top, because sending it is usually the first thing wanted. */
+function recapButton(round) {
+  if (!playedHoles(round).length) return '';
+  return `<button class="btn-flag" data-action="share-recap" data-id="${esc(round.id)}"${
+    STATE.recapBusy ? ' disabled' : ''
+  }>${STATE.recapBusy ? 'Drawing…' : 'Share Recap'}</button>`;
+}
+
 function screenSummary() {
   const round = STATE.round || store.getRound(STATE.viewRoundId);
   if (!round) return screenHome();
   return `${topbar('Round Complete')}
+    ${recapButton(round)}
     ${roundReport(round)}
     ${exportCard(round)}
     <button class="btn-primary" data-action="goto-history">Done</button>`;
@@ -1375,6 +1385,7 @@ function screenDetail() {
   const round = store.getRound(STATE.viewRoundId);
   if (!round) return screenHistory();
   return `${topbar('Round Detail')}
+    ${recapButton(round)}
     ${roundReport(round)}
     ${exportCard(round)}
     <div class="btn-row">
@@ -3728,6 +3739,25 @@ const ACTIONS = {
       notice: existing ? 'Tee time updated.' : 'Added to the diary.',
     });
     sync.syncInBackground(null, { force: true });
+  },
+
+  'share-recap': async (el) => {
+    const id = el.getAttribute('data-id');
+    const round = (STATE.round && STATE.round.id === id ? STATE.round : null) || store.getRound(id);
+    if (!round || STATE.recapBusy) return;
+    STATE.recapBusy = true;
+    render();
+    try {
+      const blob = await drawRecap(recapData(round, bench()), { benchLabel: benchName() });
+      const slug = String(round.courseName || 'round').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const outcome = await shareRecap(blob, `${slug}-${String(round.date).slice(0, 10)}.png`, round.courseName);
+      STATE.notice = outcome === 'saved' ? 'Recap image saved.' : '';
+    } catch (err) {
+      STATE.notice = 'Could not make the recap: ' + err.message;
+    } finally {
+      STATE.recapBusy = false;
+      render();
+    }
   },
 
   'open-invite': (el) => {
