@@ -201,6 +201,11 @@ export function usePresets() {
   return getPrefs().presets === true;
 }
 
+/** Miss grid on the shot screen itself (default), or behind a tap. */
+export function missInline() {
+  return getPrefs().missInline !== false;
+}
+
 /** 'auto' follows the phone, otherwise 'light' or 'dark'. */
 export function getTheme() {
   return getPrefs().theme || 'auto';

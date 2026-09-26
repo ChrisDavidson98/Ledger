@@ -1044,3 +1044,16 @@ input.stepper-input:focus { outline: none; }
 }
 .seg > button { white-space: nowrap; }
 .wpw-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+
+/* Quick repeated taps (the − / + stepper above all) must not read as a
+   double-tap zoom on iPhone. */
+button, a, input, .lie-cell, .miss-cell { touch-action: manipulation; }
+
+/* The shot buttons sit on a solid strip, so nothing scrolled under
+   them — "End round here" with the keyboard up — shows through. */
+.dock-play {
+  background: var(--bg);
+  border-top: 1px solid var(--rule-soft);
+}
+.miss-inline { margin: 8px auto 14px; max-width: 100%; }
+.miss-inline .miss-cell { aspect-ratio: auto; min-height: 44px; }

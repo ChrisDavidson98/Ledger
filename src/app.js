@@ -183,7 +183,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26k';
+const BUILD = '2026-09-26l';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -698,6 +698,9 @@ function renderHoleRuler(hole) {
 
   const ticks = [];
   for (let t = 100; t < length; t += 100) ticks.push(t);
+  // A tick label within about 40px of the tee's own yardage would sit
+  // on top of it (a 510-yard hole and its 500 mark), so that one goes.
+  const labelled = (t) => pos(t) - x0 > 40;
 
   const segments = [];
   let from = length;
@@ -717,7 +720,7 @@ function renderHoleRuler(hole) {
     ${ticks.map((t) => `
       <line x1="${pos(t)}" y1="${lineY - 4}" x2="${pos(t)}" y2="${lineY + 4}" stroke="var(--rule-strong)" stroke-width="1"/>
       <text x="${pos(t)}" y="${lineY + 20}" text-anchor="middle" font-size="9.5"
-        font-family="Martian Mono, monospace" fill="var(--text-2)">${t}</text>`).join('')}
+        font-family="Martian Mono, monospace" fill="var(--text-2)">${labelled(t) ? t : ''}</text>`).join('')}
     <text x="${x0}" y="${lineY + 20}" text-anchor="start" font-size="9.5"
       font-family="Martian Mono, monospace" fill="var(--text-2)">${length}</text>
     ${segments.map((s) => `
@@ -858,12 +861,20 @@ function renderShotForm(hole, start, category, shotNum) {
       ${store.usePresets() ? renderPresets(unit, draft.endDist) : ''}
     ` : ''}
 
+    ${misses && store.missInline() ? `
+      <div class="eyebrow" style="margin:4px 0 0">Miss &middot; optional</div>
+      <div class="miss-grid miss-inline" role="group" aria-label="Where did you miss?">
+        ${MISS_GRID.flat().map((dir) => `
+          <button class="miss-cell ${dir === 'target' ? 'center' : ''} ${draft.miss === dir ? 'active' : ''}"
+                  data-miss="${dir}" aria-pressed="${draft.miss === dir}">${dir === 'target' ? 'Hit it' : MISS_LABELS[dir]}</button>`).join('')}
+      </div>` : ''}
+
     <div class="field-row">
       ${clubs ? `
         <button class="field" data-action="open-sheet" data-sheet="club">
           <span class="eyebrow">Club</span><strong>${esc(draft.club || '—')}</strong>
         </button>` : ''}
-      ${misses ? `
+      ${misses && !store.missInline() ? `
         <button class="field" data-action="open-sheet" data-sheet="miss">
           <span class="eyebrow">Miss</span><strong>${esc(draft.miss ? (draft.miss === 'target' ? 'Hit it' : MISS_LABELS[draft.miss]) : '—')}</strong>
         </button>` : ''}
@@ -1262,6 +1273,13 @@ function screenSettings() {
         <button class="chip ${store.trackClubs() ? 'active' : ''}" data-clubs="on">Track</button>
       </div>
       <p class="tiny">Adds one optional tap on approach shots only &mdash; not tee shots, chips or putts. Enough to learn what each iron really goes without tripling the taps for answers you already know.</p>
+
+      <label>Miss direction</label>
+      <div class="chip-grid g2">
+        <button class="chip ${store.missInline() ? 'active' : ''}" data-miss-inline="on">On screen</button>
+        <button class="chip ${store.missInline() ? '' : 'active'}" data-miss-inline="off">Behind a tap</button>
+      </div>
+      <p class="tiny">On tee shots and approaches. On screen shows the grid under the distance so a miss is one tap; behind a tap keeps the screen shorter. Either way it is optional.</p>
     </div>
 
     ${sync.isConfigured() ? `
@@ -4960,7 +4978,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-dist-step],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window],[data-repair-course]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-dist-step],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-miss-inline],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window],[data-repair-course]');
   if (!target) return;
 
   const benchmark = target.getAttribute('data-benchmark');
@@ -5126,6 +5144,9 @@ function onClick(event) {
 
   const presets = target.getAttribute('data-presets');
   if (presets) { store.setPref('presets', presets === 'on'); return render(); }
+
+  const missInlinePref = target.getAttribute('data-miss-inline');
+  if (missInlinePref) { store.setPref('missInline', missInlinePref === 'on'); return render(); }
 
   const standingsScope = target.getAttribute('data-standings');
   if (standingsScope) {
