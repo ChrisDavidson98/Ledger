@@ -40,6 +40,7 @@ import * as SCH from './src/schedule.js';
 import * as CH from './src/charts.js';
 import * as RC from './src/recap.js';
 import * as PR from './src/practice.js';
+import * as STD from './src/standings.js';
 // Only the PURE helpers are called from here. Importing the module is
 // safe — it has no side effects at load — but nothing below may read
 // or write localStorage, or opening this page would edit real data.
@@ -1037,6 +1038,26 @@ check('a booked session of the right kind in the next week is found, others are 
   ];
   const hit = PR.bookedFocus(list, 'Putting', '2026-09-26');
   return hit && hit.date === '2026-09-30' ? null : `got ${hit && hit.date}`;
+});
+
+check('standings rank qualified players on strokes gained and leave the rest unranked', () => {
+  const now = new Date(2026, 8, 26, 12);
+  const on = (r, player, day) => { r.player = player; r.date = new Date(2026, 8, day, 12).toISOString(); return r; };
+  const good = () => roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'fairway', 120), shot('fairway', 120, 'green', 8), shot('green', 8, null, null, { holed: true })] }]);
+  const poor = () => roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'rough', 180), shot('rough', 180, 'rough', 40), shot('rough', 40, 'green', 30),
+    shot('green', 30, 'green', 6), shot('green', 6, null, null, { holed: true })] }]);
+  const rounds = [];
+  for (let d = 1; d <= 5; d++) rounds.push(on(good(), 'Kaden', d + 10), on(poor(), 'Manny', d + 10));
+  rounds.push(on(good(), 'Chris', 20));
+  const { rows } = STD.standings(rounds, { scope: 'season', now });
+  if (rows[0].player !== 'Kaden' || rows[0].rank !== 1) return `leader ${rows[0].player}`;
+  if (rows[1].player !== 'Manny' || rows[1].rank !== 2) return `second ${rows[1].player}`;
+  const chris = rows.find((r) => r.player === 'Chris');
+  if (chris.qualified || chris.rank) return 'one round qualified';
+  const recent = STD.standings(rounds, { scope: 'recent', now });
+  return recent.rows.find((r) => r.player === 'Chris').qualified ? 'one round qualified the 30-day table' : null;
 });
 
 check('a deleted tee time is visible to nobody', () => {

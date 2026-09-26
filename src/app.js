@@ -98,6 +98,7 @@ import { missingSeeds, cloneSeed } from './seed.js';
 import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js';
 import { recapData, drawRecap, shareRecap } from './recap.js';
 import { practiceFocus, bookedFocus } from './practice.js';
+import { standings } from './standings.js';
 import { planRepair, describePlan } from './repair.js';
 import {
   handicapProfile, fmtHandicap, fmtHandicapShort, upsideFor,
@@ -182,7 +183,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26c';
+const BUILD = '2026-09-26d';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -2783,6 +2784,7 @@ function screenClubhouse() {
 
   return `${topbar('Clubhouse')}
     ${notices()}
+    ${renderStandings(all)}
     <div class="card">
       <h2>Everyone</h2>
       <p class="muted">${players.length} player${players.length === 1 ? '' : 's'}, ${all.length} round${all.length === 1 ? '' : 's'} between them. The leader in each row is marked.</p>
@@ -2821,6 +2823,65 @@ function screenClubhouse() {
 
     ${renderClubhouseNotes(summaries)}
     ${renderSharedHoles(all, players)}`;
+}
+
+/**
+ * The season table: who is winning, on strokes gained per 18, with
+ * the leader in each part of the game underneath.
+ */
+function renderStandings(allRounds) {
+  const scope = STATE.standingsScope === 'recent' ? 'recent' : 'season';
+  const { rows, minRounds, leaders } = standings(allRounds, { scope, baseline: bench() });
+  const cols = 'grid-template-columns:26px minmax(0,1fr) 36px 52px 58px';
+  const year = new Date().getFullYear();
+
+  const moveText = (row) => {
+    if (scope !== 'season' || !row.rank) return '';
+    if (row.move == null) return 'new';
+    if (row.move > 0) return `&#9650; ${row.move}`;
+    if (row.move < 0) return `&#9660; ${-row.move}`;
+    return 'no change';
+  };
+
+  const body = rows.length ? rows.map((row) => {
+    const lead = row.rank === 1;
+    return `<div style="display:grid;gap:0 8px;border-bottom:1px solid var(--cream);${cols};align-items:center;padding:12px 0;${lead ? 'background:var(--flag-wash);margin:0 -18px;padding-left:18px;padding-right:18px;' : ''}${row.qualified ? '' : 'opacity:0.6;'}">
+      <span class="display" style="font-size:20px;${lead ? 'color:var(--flag)' : ''}">${row.rank || '&ndash;'}</span>
+      <div>
+        <div style="font-weight:600">${esc(row.player)}${row.player === STATE.player ? ' <span class="tiny">you</span>' : ''}</div>
+        <div class="tiny">${row.qualified ? moveText(row) : `${minRounds - row.shotRounds} more to qualify`}</div>
+      </div>
+      <span class="mono" style="text-align:right">${row.rounds}</span>
+      <span class="mono" style="text-align:right">${row.toParPer18 == null ? '&ndash;' : fmtToPar(Math.round(row.toParPer18 * 10) / 10)}</span>
+      <span class="mono ${row.sg ? sgClass(row.sg.total) : ''}" style="text-align:right;font-weight:600">${row.sg ? fmtSG(row.sg.total).replace(/(\.\d)\d$/, '$1') : '&ndash;'}</span>
+    </div>`;
+  }).join('') : `<p class="muted" style="margin-top:12px">No rounds ${scope === 'season' ? `in ${year}` : 'in the last 30 days'} yet.</p>`;
+
+  return `<div class="chip-grid g2" style="margin-top:14px">
+      <button class="chip ${scope === 'season' ? 'active' : ''}" data-standings="season">${year} Season</button>
+      <button class="chip ${scope === 'recent' ? 'active' : ''}" data-standings="recent">Last 30 days</button>
+    </div>
+    <div class="card">
+      <div class="split">
+        <h2>Standings</h2>
+        <span class="tiny">SG per 18 &middot; vs ${esc(benchName())}</span>
+      </div>
+      <div class="tiny" style="display:grid;gap:0 8px;margin-top:10px;border-bottom:1px solid var(--green-line);${cols};text-transform:uppercase;letter-spacing:0.06em;padding-bottom:8px">
+        <span>#</span><span>Player</span><span style="text-align:right">Rds</span><span style="text-align:right">Avg</span><span style="text-align:right">SG</span>
+      </div>
+      ${body}
+      <p class="tiny" style="margin-top:10px">Ranked on strokes gained per 18, so different courses and tees compare fairly. Avg is score over par per 18. ${minRounds} rounds with shots to qualify.</p>
+    </div>
+    ${leaders ? `<div class="card">
+      <h2>Category leaders</h2>
+      <div class="stat-grid">
+        ${CATEGORIES.map((c) => `
+          <div class="stat-box" style="text-align:left">
+            <div class="lbl">${CATEGORY_LABELS[c]}</div>
+            <div style="font-weight:600;margin-top:4px">${esc(leaders[c].player)} <span class="mono ${sgClass(leaders[c].sg)}">${fmtSG(leaders[c].sg).replace(/(\.\d)\d$/, '$1')}</span></div>
+          </div>`).join('')}
+      </div>
+    </div>` : ''}`;
 }
 
 /**
@@ -4441,7 +4502,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window],[data-repair-course]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window],[data-repair-course]');
   if (!target) return;
 
   const benchmark = target.getAttribute('data-benchmark');
@@ -4593,6 +4654,12 @@ function onClick(event) {
 
   const presets = target.getAttribute('data-presets');
   if (presets) { store.setPref('presets', presets === 'on'); return render(); }
+
+  const standingsScope = target.getAttribute('data-standings');
+  if (standingsScope) {
+    STATE.standingsScope = standingsScope;
+    return render();
+  }
 
   const scope = target.getAttribute('data-scope');
   if (scope) {
