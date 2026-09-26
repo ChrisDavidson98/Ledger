@@ -16,16 +16,17 @@ import {
 const W = 1080;
 const H = 1350;
 
+/* The yardage-book light palette. Always light: an image lives on in
+   other people's chats long after this phone's theme is known. */
 const C = {
-  cream: '#f6f3ea',
-  paper: '#fffefb',
-  ink: '#1e2621',
-  soft: '#5b6660',
-  faint: '#8b9590',
-  green: '#173b2e',
-  mid: '#3e6b57',
-  line: '#b9c9bc',
-  flag: '#a8391f',
+  paper: '#f7f4ec',
+  grid: '#ece7da',
+  ink: '#16150f',
+  soft: '#5d5a50',
+  faint: '#8a8676',
+  rule: '#d9d3c3',
+  gain: '#1f5fbf',
+  loss: '#b8431b',
 };
 
 /**
@@ -74,7 +75,7 @@ export function fmtSG(v) {
 }
 
 function fmtToPar(d) {
-  return d === 0 ? 'E' : d > 0 ? '+' + d : String(d);
+  return d === 0 ? 'E' : d > 0 ? '+' + d : '−' + Math.abs(d);
 }
 
 function fmtDay(value) {
@@ -83,182 +84,189 @@ function fmtDay(value) {
   const key = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
   const d = key ? new Date(+key[1], +key[2] - 1, +key[3]) : new Date(value);
   if (Number.isNaN(d.getTime())) return String(value || '');
-  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 /** Fits text to a width by shrinking it, never by cutting a course name off. */
-function fitFont(ctx, text, weight, size, family, maxWidth) {
+function fitFont(ctx, text, style, size, family, maxWidth) {
   let s = size;
-  ctx.font = `${weight} ${s}px ${family}`;
+  ctx.font = `${style} ${s}px ${family}`;
   while (s > 24 && ctx.measureText(text).width > maxWidth) {
     s -= 2;
-    ctx.font = `${weight} ${s}px ${family}`;
+    ctx.font = `${style} ${s}px ${family}`;
   }
 }
 
-const SLAB = '"Zilla Slab", Georgia, serif';
-const SANS = '"IBM Plex Sans", -apple-system, sans-serif';
+const SERIF = '"Instrument Serif", Georgia, serif';
+const MONO = '"Martian Mono", ui-monospace, monospace';
+const SANS = '"Public Sans", -apple-system, sans-serif';
+
+/** Small mono capitals, spaced out: the yardage-book label. */
+function eyebrow(ctx, text, x, y, colour = C.soft, align = 'left', size = 22) {
+  ctx.save();
+  ctx.font = `500 ${size}px ${MONO}`;
+  ctx.fillStyle = colour;
+  ctx.textAlign = align;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${size * 0.08}px`;
+  ctx.fillText(String(text).toUpperCase(), x, y);
+  ctx.restore();
+}
+
+function rule(ctx, y, colour, width = 2) {
+  ctx.fillStyle = colour;
+  ctx.fillRect(PAD, y, W - PAD * 2, width);
+}
+
+const PAD = 72;
+
+/** The typefaces are web fonts; a canvas draws with a fallback unless they are loaded first. */
+async function loadFonts() {
+  if (!document.fonts || !document.fonts.load) return;
+  try {
+    await Promise.all([
+      document.fonts.load(`100px ${SERIF}`),
+      document.fonts.load(`italic 100px ${SERIF}`),
+      document.fonts.load(`500 20px ${MONO}`),
+      document.fonts.load(`600 20px ${MONO}`),
+      document.fonts.load(`500 20px ${SANS}`),
+    ]);
+  } catch (err) { /* offline without the fonts cached: the fallbacks are fine */ }
+}
 
 /** Draws the recap and resolves to a PNG blob. */
 export async function drawRecap(data, { benchLabel = 'tour' } = {}) {
-  if (document.fonts && document.fonts.ready) {
-    try { await document.fonts.ready; } catch (err) { /* system fonts are fine */ }
-  }
+  await loadFonts();
 
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d');
-  const pad = 80;
-
-  ctx.fillStyle = C.cream;
-  ctx.fillRect(0, 0, W, H);
-
-  // Header band.
-  ctx.fillStyle = C.green;
-  ctx.fillRect(0, 0, W, 300);
-  ctx.fillStyle = C.flag;
-  ctx.fillRect(0, 300, W, 10);
-
   ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = '#b9c9bc';
-  ctx.font = `600 30px ${SANS}`;
-  ctx.fillText(String(data.player || '').toUpperCase(), pad, 100);
 
-  ctx.fillStyle = '#ffffff';
-  fitFont(ctx, data.course || 'Round', 700, 72, SLAB, W - pad * 2);
-  ctx.fillText(data.course || 'Round', pad, 185);
+  // Paper and its faint grid.
+  ctx.fillStyle = C.paper;
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = C.grid;
+  for (let x = 0; x < W; x += 36) ctx.fillRect(x, 0, 2, H);
+  for (let y = 0; y < H; y += 36) ctx.fillRect(0, y, W, 2);
 
-  ctx.fillStyle = '#d3e2d7';
-  ctx.font = `400 32px ${SANS}`;
-  const sub = [fmtDay(data.date), data.tee ? `${data.tee} tees` : '', `${data.holes} holes`].filter(Boolean).join('  ·  ');
-  ctx.fillText(sub, pad, 250);
-
-  // Score.
-  let y = 450;
+  // Masthead.
   ctx.fillStyle = C.ink;
-  ctx.font = `700 150px ${SLAB}`;
-  ctx.fillText(String(data.score), pad, y);
+  ctx.font = `400 88px ${SERIF}`;
+  ctx.fillText('Ledger', PAD, 132);
+  const word = ctx.measureText('Ledger').width;
+  ctx.fillStyle = C.loss;
+  ctx.fillText('.', PAD + word, 132);
+  eyebrow(ctx, `${data.player || ''} · ${fmtDay(data.date)}`, W - PAD, 124, C.soft, 'right');
+  rule(ctx, 162, C.ink, 4);
+
+  // The round.
+  eyebrow(ctx, [data.tee ? `${data.tee} tees` : '', `${data.holes} holes`].filter(Boolean).join(' · '), PAD, 228);
+  ctx.fillStyle = C.ink;
+  fitFont(ctx, data.course || 'Round', '400', 92, SERIF, W - PAD * 2);
+  ctx.fillText(data.course || 'Round', PAD, 318);
+
+  // Score, and strokes gained beside it.
+  const scoreY = 560;
+  ctx.fillStyle = C.ink;
+  ctx.font = `400 250px ${SERIF}`;
+  ctx.fillText(String(data.score), PAD - 6, scoreY);
   const scoreW = ctx.measureText(String(data.score)).width;
-  ctx.fillStyle = data.toPar <= 0 ? C.mid : C.flag;
-  ctx.font = `600 64px ${SLAB}`;
-  ctx.fillText(fmtToPar(data.toPar), pad + scoreW + 30, y);
+  ctx.font = `italic 400 96px ${SERIF}`;
+  ctx.fillStyle = data.toPar <= 0 ? C.gain : C.ink;
+  ctx.fillText(fmtToPar(data.toPar), PAD + scoreW + 20, scoreY);
 
   if (data.total != null) {
+    eyebrow(ctx, 'Strokes gained', W - PAD, scoreY - 150, C.soft, 'right');
     ctx.textAlign = 'right';
-    ctx.fillStyle = C.soft;
-    ctx.font = `500 28px ${SANS}`;
-    ctx.fillText('STROKES GAINED', W - pad, y - 90);
-    ctx.fillStyle = data.total >= 0 ? C.mid : C.flag;
-    ctx.font = `700 84px ${SLAB}`;
-    ctx.fillText(fmtSG(data.total), W - pad, y);
-    ctx.fillStyle = C.faint;
-    ctx.font = `400 24px ${SANS}`;
-    ctx.fillText(`vs. ${benchLabel} baseline`, W - pad, y + 38);
+    ctx.font = `400 120px ${SERIF}`;
+    ctx.fillStyle = data.total >= 0 ? C.gain : C.loss;
+    ctx.fillText(fmtSG(data.total), W - PAD, scoreY - 20);
     ctx.textAlign = 'left';
+    eyebrow(ctx, `vs ${benchLabel}`, W - PAD, scoreY + 22, C.faint, 'right', 20);
   }
 
-  y += 90;
+  let y = scoreY + 70;
+  rule(ctx, y, C.ink, 3);
 
   if (data.categories.length) {
-    // Four bars off a shared zero, same reading as the round screen.
-    const labelW = 230;
-    const valueW = 140;
-    const zeroX = pad + labelW + (W - pad * 2 - labelW - valueW) / 2;
-    const half = (W - pad * 2 - labelW - valueW) / 2 - 10;
+    // Four ruled rows, each with a bar off a shared zero.
+    const rowH = 96;
+    const labelW = 300;
+    const valueW = 170;
+    const barLeft = PAD + labelW;
+    const barRight = W - PAD - valueW;
+    const zeroX = (barLeft + barRight) / 2;
+    const half = (barRight - barLeft) / 2 - 8;
     const scale = Math.max(2, ...data.categories.map((c) => Math.abs(c.sg)));
-    const rowH = 100;
-
-    ctx.strokeStyle = C.line;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(zeroX, y + 10);
-    ctx.lineTo(zeroX, y + rowH * data.categories.length);
-    ctx.stroke();
 
     data.categories.forEach((c, i) => {
-      const cy = y + i * rowH + rowH / 2 + 10;
+      const top = y + i * rowH;
+      const mid = top + rowH / 2;
       ctx.fillStyle = C.ink;
       ctx.font = `500 34px ${SANS}`;
       ctx.textBaseline = 'middle';
-      ctx.fillText(c.label, pad, cy);
+      ctx.fillText(c.label, PAD, mid);
 
+      ctx.fillStyle = C.rule;
+      ctx.fillRect(zeroX - 1, top + 18, 2, rowH - 36);
       const len = (Math.abs(c.sg) / scale) * half;
-      ctx.fillStyle = c.sg >= 0 ? C.mid : C.flag;
-      const x = c.sg >= 0 ? zeroX : zeroX - len;
-      roundRect(ctx, x, cy - 24, Math.max(len, 4), 48, 8);
+      ctx.fillStyle = c.sg >= 0 ? C.gain : C.loss;
+      ctx.fillRect(c.sg >= 0 ? zeroX : zeroX - len, mid - 9, Math.max(len, 3), 18);
 
       ctx.textAlign = 'right';
-      ctx.font = `700 38px ${SLAB}`;
-      ctx.fillText(fmtSG(c.sg), W - pad, cy);
+      ctx.font = `600 34px ${MONO}`;
+      ctx.fillText(fmtSG(c.sg), W - PAD, mid);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
+      rule(ctx, top + rowH, C.rule, 2);
     });
-    y += rowH * data.categories.length + 70;
+    y += rowH * data.categories.length;
   } else {
     ctx.fillStyle = C.soft;
-    ctx.font = `400 32px ${SANS}`;
-    ctx.fillText('Score only — no shots logged for this one.', pad, y + 40);
-    y += 140;
+    ctx.font = `italic 400 44px ${SERIF}`;
+    ctx.fillText('Score only — no shots logged for this one.', PAD, y + 80);
+    y += 130;
+    rule(ctx, y, C.rule, 2);
   }
 
-  // Best and worst hole.
+  // Best and toughest hole, as two more ruled rows.
   if (data.best && data.worst) {
-    const boxW = (W - pad * 2 - 30) / 2;
-    holeBox(ctx, pad, y, boxW, 'BEST HOLE', data.best, C.mid);
-    holeBox(ctx, pad + boxW + 30, y, boxW, 'TOUGHEST HOLE', data.worst, C.flag);
+    y += 20;
+    [['Best hole', data.best, C.gain], ['Toughest hole', data.worst, C.loss]].forEach(([title, hole, colour], i) => {
+      const top = y + i * 104;
+      const mid = top + 58;
+      eyebrow(ctx, title, PAD, mid + 8);
+      ctx.fillStyle = C.ink;
+      ctx.font = `400 64px ${SERIF}`;
+      ctx.fillText(`No. ${hole.hole}`, PAD + 330, mid + 20);
+      eyebrow(ctx, `Par ${hole.par} · ${hole.score}`, PAD + 580, mid + 8);
+      if (hole.sg != null) {
+        ctx.textAlign = 'right';
+        ctx.font = `600 34px ${MONO}`;
+        ctx.fillStyle = colour;
+        ctx.fillText(fmtSG(hole.sg), W - PAD, mid + 10);
+        ctx.textAlign = 'left';
+      }
+      rule(ctx, top + 104, C.rule, 2);
+    });
   }
 
   // Footer.
-  ctx.fillStyle = C.faint;
-  ctx.font = `500 26px ${SANS}`;
-  ctx.textAlign = 'center';
-  ctx.fillText('LEDGER  ·  STROKES GAINED', W / 2, H - 60);
-  ctx.textAlign = 'left';
+  rule(ctx, H - 110, C.ink, 3);
+  eyebrow(ctx, 'Ledger · strokes gained', PAD, H - 58, C.soft);
+  ctx.fillStyle = C.loss;
+  ctx.fillRect(W - PAD - 26, H - 92, 4, 44);
+  ctx.beginPath();
+  ctx.moveTo(W - PAD - 22, H - 92);
+  ctx.lineTo(W - PAD + 4, H - 83);
+  ctx.lineTo(W - PAD - 22, H - 74);
+  ctx.closePath();
+  ctx.fill();
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not draw the image.'))), 'image/png');
   });
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  const rr = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rr, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rr);
-  ctx.arcTo(x + w, y + h, x, y + h, rr);
-  ctx.arcTo(x, y + h, x, y, rr);
-  ctx.arcTo(x, y, x + w, y, rr);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function holeBox(ctx, x, y, w, title, hole, accent) {
-  const h = 230;
-  ctx.fillStyle = C.paper;
-  roundRect(ctx, x, y, w, h, 22);
-  ctx.fillStyle = accent;
-  ctx.fillRect(x, y + 22, 8, h - 44);
-
-  ctx.fillStyle = C.soft;
-  ctx.font = `600 24px ${SANS}`;
-  ctx.fillText(title, x + 40, y + 55);
-
-  ctx.fillStyle = C.ink;
-  ctx.font = `700 64px ${SLAB}`;
-  ctx.fillText(`#${hole.hole}`, x + 40, y + 135);
-
-  ctx.fillStyle = C.soft;
-  ctx.font = `400 30px ${SANS}`;
-  ctx.fillText(`Par ${hole.par}  ·  ${hole.score}`, x + 40, y + 185);
-
-  if (hole.sg != null) {
-    ctx.textAlign = 'right';
-    ctx.fillStyle = accent;
-    ctx.font = `700 40px ${SLAB}`;
-    ctx.fillText(fmtSG(hole.sg), x + w - 30, y + 135);
-    ctx.textAlign = 'left';
-  }
 }
 
 /**
