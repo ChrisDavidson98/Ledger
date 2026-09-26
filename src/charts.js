@@ -155,13 +155,13 @@ export function approachByDistanceChart(buckets, { thinBelow = 5, label = 'tour'
   if (!buckets.length) return '';
 
   const W = 320;
-  const H = 146;
+  const H = 158;
   const padT = 10;
-  // Room for two stacked labels under each bar — the distance band and
-  // the shot count — and nothing else. An axis caption was tried here
+  // Room for three stacked labels under each bar — the band over two
+  // lines, then the shot count — and nothing else. An axis caption was tried here
   // and collided with the counts at narrow widths; the card's own text
   // says the same thing with room to say it.
-  const padB = 30;
+  const padB = 42;
   const padL = 36; // room for "+0.7" in the wide mono face
   const padR = 6;
 
@@ -181,12 +181,17 @@ export function approachByDistanceChart(buckets, { thinBelow = 5, label = 'tour'
     const height = Math.abs(scale(value));
     const y = value >= 0 ? zeroY - height : zeroY;
     const thin = bucket.shots < thinBelow;
+    // "125-150" on one line runs into its neighbour in the wide mono
+    // face once there are six or more bands, so it goes over two.
+    const [lo, hi = ''] = String(bucket.label).split('-');
 
     return `<g opacity="${thin ? 0.45 : 1}">
       <g fill="${barColour(value)}">${bar(x, y, barW, height, 3, value >= 0 ? 'up' : 'down')}</g>
-      <text x="${centre}" y="${H - 16}" text-anchor="middle" font-size="8.5"
-            fill="var(--ink-soft)" font-family="${MONO}">${bucket.label}</text>
-      <text x="${centre}" y="${H - 5}" text-anchor="middle" font-size="8"
+      <text x="${centre}" y="${H - 28}" text-anchor="middle" font-size="8.5"
+            fill="var(--ink-soft)" font-family="${MONO}">${lo}</text>
+      <text x="${centre}" y="${H - 17}" text-anchor="middle" font-size="8.5"
+            fill="var(--ink-soft)" font-family="${MONO}">${hi ? `–${hi}` : ""}</text>
+      <text x="${centre}" y="${H - 4}" text-anchor="middle" font-size="8"
             fill="var(--ink-faint)" font-family="${MONO}">${bucket.shots}</text>
     </g>`;
   }).join('');

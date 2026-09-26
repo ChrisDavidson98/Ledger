@@ -183,7 +183,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26g';
+const BUILD = '2026-09-26h';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.

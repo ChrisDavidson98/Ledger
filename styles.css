@@ -684,13 +684,13 @@ label {
 
 /* Distance band at the head of a Stats row: approach yards, putt feet. */
 .range-tag {
-  flex: 0 0 64px;
+  flex: 0 0 78px;
   display: flex;
   flex-direction: column;
   font-family: var(--font-mono);
   line-height: 1.2;
 }
-.range-tag span { font-size: 13px; font-weight: 600; color: var(--text); }
+.range-tag span { font-size: 12px; font-weight: 600; color: var(--text); }
 .range-tag small {
   font-size: 9.5px;
   text-transform: uppercase;
