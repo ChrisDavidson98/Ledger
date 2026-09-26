@@ -39,6 +39,7 @@ import * as E from './src/brief.js';
 import * as SCH from './src/schedule.js';
 import * as CH from './src/charts.js';
 import * as RC from './src/recap.js';
+import * as PR from './src/practice.js';
 // Only the PURE helpers are called from here. Importing the module is
 // safe — it has no side effects at load — but nothing below may read
 // or write localStorage, or opening this page would edit real data.
@@ -1009,6 +1010,33 @@ check('a score-only recap has a score and no strokes gained', () => {
   if (d.total !== null || d.categories.length) return 'strokes gained on a score-only round';
   if (d.best.hole !== 2 || d.worst.hole !== 1) return 'best/worst wrong by score';
   return null;
+});
+
+check('practice focus waits for enough rounds, then names a category with a plan', () => {
+  if (PR.practiceFocus([mediumRound(), mediumRound()])) return 'spoke up after two rounds';
+  const f = PR.practiceFocus([mediumRound(), mediumRound(), mediumRound()], { minRounds: 3 });
+  if (f === null) return null; // a balanced fixture may have no weakness worth a session
+  if (!PR.FOCUS_PLANS[f.category]) return `unknown category ${f.category}`;
+  if (!(f.strokesPer18 >= 0.5)) return `upside ${f.strokesPer18}`;
+  return null;
+});
+
+check('practice focus ignores score-only rounds', () => {
+  const card = () => roundOf([{ par: 4, score: 7 }, { par: 3, score: 6 }], 'score');
+  return PR.practiceFocus([card(), card(), card(), card()]) ? 'built a focus from no shots' : null;
+});
+
+check('a booked session of the right kind in the next week is found, others are not', () => {
+  const mk = (date, practiceType, extra = {}) => ({ id: date + practiceType, kind: 'practice', status: 'scheduled', date, practiceType, ...extra });
+  const list = [
+    mk('2026-09-25', 'Putting'),
+    mk('2026-10-10', 'Putting'),
+    mk('2026-09-28', 'Range'),
+    mk('2026-09-27', 'Putting', { status: 'cancelled' }),
+    mk('2026-09-30', 'Putting'),
+  ];
+  const hit = PR.bookedFocus(list, 'Putting', '2026-09-26');
+  return hit && hit.date === '2026-09-30' ? null : `got ${hit && hit.date}`;
 });
 
 check('a deleted tee time is visible to nobody', () => {

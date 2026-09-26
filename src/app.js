@@ -97,6 +97,7 @@ import * as sync from './sync.js';
 import { missingSeeds, cloneSeed } from './seed.js';
 import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js';
 import { recapData, drawRecap, shareRecap } from './recap.js';
+import { practiceFocus, bookedFocus } from './practice.js';
 import { planRepair, describePlan } from './repair.js';
 import {
   handicapProfile, fmtHandicap, fmtHandicapShort, upsideFor,
@@ -181,7 +182,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26b';
+const BUILD = '2026-09-26c';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -388,6 +389,7 @@ function screenHome() {
     ${notices()}
     ${renderInviteBanner()}
     ${renderScheduleBanner()}
+    ${resumable ? '' : renderPracticeFocus()}
     ${resumable ? `
       <div class="card">
         <h2>Round in progress</h2>
@@ -813,9 +815,12 @@ function renderHoleComplete(hole) {
 /** At the top, because sending it is usually the first thing wanted. */
 function recapButton(round) {
   if (!playedHoles(round).length) return '';
-  return `<button class="btn-flag" data-action="share-recap" data-id="${esc(round.id)}"${
-    STATE.recapBusy ? ' disabled' : ''
-  }>${STATE.recapBusy ? 'Drawing…' : 'Share Recap'}</button>`;
+  // Spaced like a card so it does not sit on the red rule under the header.
+  return `<div style="margin:18px 0 14px">
+    <button class="btn-flag" data-action="share-recap" data-id="${esc(round.id)}"${
+      STATE.recapBusy ? ' disabled' : ''
+    }>${STATE.recapBusy ? 'Drawing…' : 'Share Recap'}</button>
+  </div>`;
 }
 
 function screenSummary() {
@@ -1602,6 +1607,38 @@ function renderInviteBanner() {
     <div class="btn-row">
       <button class="btn-ghost" data-action="dismiss-invites">Got It</button>
     </div>
+  </div>`;
+}
+
+/**
+ * "Go and practise this" — the weakest part of the recent game, with a
+ * session to book. Silent until there are enough rounds to mean it.
+ */
+function renderPracticeFocus() {
+  const focus = practiceFocus(playerRounds());
+  if (!focus) return '';
+  const { plan } = focus;
+  const booked = bookedFocus(
+    visibleTeeTimes(store.getLiveTeeTimes(), STATE.player), plan.practiceType, todayKey()
+  );
+  const days = booked ? daysFromToday(booked.date) : null;
+  const when = booked ? (days === 0 ? 'today' : days === 1 ? 'tomorrow' : fmtDateKey(booked.date)) : '';
+
+  return `<div class="card">
+    <div class="split">
+      <h2>Practice focus</h2>
+      <span class="tiny">last ${focus.rounds} rounds</span>
+    </div>
+    <p class="muted"><strong>${esc(CATEGORY_LABELS[focus.category])}</strong> is costing you about
+      <strong class="sg-neg">${focus.strokesPer18.toFixed(1)} strokes</strong> a round. It plays like a
+      ${esc(fmtHandicap(focus.handicap))} handicap against ${esc(fmtHandicap(focus.overall))} for the rest of your game.</p>
+    <div class="fairway-divider"></div>
+    <p style="margin:0 0 4px"><strong>${esc(plan.title)}</strong> &middot; ${plan.minutes} min</p>
+    <p class="tiny">${esc(plan.drill)}</p>
+    ${booked ? `
+      <p class="tiny">You have ${esc(plan.practiceType.toLowerCase())} booked ${esc(when)} &mdash; spend it on this.</p>
+      <button class="btn-ghost" data-action="view-tee-time" data-id="${esc(booked.id)}">See Session</button>` : `
+      <button class="btn-primary" data-action="book-focus" data-category="${esc(focus.category)}">Book a Session</button>`}
   </div>`;
 }
 
@@ -3672,6 +3709,29 @@ const ACTIONS = {
         practiceType: null,
         invitees: [],
         notes: '',
+      },
+    });
+  },
+
+  // Lands on the ordinary edit screen so the day, time and who else is
+  // coming are still the player's to choose.
+  'book-focus': () => {
+    const focus = practiceFocus(playerRounds());
+    if (!focus) return;
+    go('teeTimeEdit', {
+      teeTimeDraft: {
+        id: null,
+        kind: 'practice',
+        date: todayKey(),
+        time: '',
+        courseId: null,
+        courseName: '',
+        teeName: null,
+        layoutKey: null,
+        holes: null,
+        practiceType: focus.plan.practiceType,
+        invitees: [],
+        notes: `${focus.plan.title}: ${focus.plan.drill}`,
       },
     });
   },
