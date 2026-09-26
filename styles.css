@@ -319,38 +319,41 @@ label {
   left: 0;
   right: 0;
   background: var(--paper);
-  border-top: 1px solid var(--green-line);
+  border-top: 1px solid rgba(23, 59, 46, 0.08);
   display: flex;
   justify-content: space-around;
-  padding: 6px 0 max(6px, env(safe-area-inset-bottom));
+  align-items: center;
+  padding: 8px 12px max(10px, env(safe-area-inset-bottom));
   z-index: 10;
 }
+/* Icons only; the current tab opens into a pill with its name, so the
+   bar says where you are without five labels competing for room. */
 .navbtn {
   background: none;
   border: none;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 3px;
-  color: var(--ink-soft);
-  font-size: 11px;
-  font-weight: 600;
-  /* Six tabs have to fit a 320px phone, so the padding gives way
-     before the labels do. Adding the diary was what took it from five
-     to six, and it is the reason Clubhouse is labelled Club. */
-  padding: 6px 2px;
-  flex: 1 1 0;
-  min-width: 0;
+  justify-content: center;
+  gap: 8px;
+  min-width: 46px;
+  height: 46px;
+  padding: 0 12px;
+  border-radius: 23px;
+  color: var(--ink-faint);
+  font: 600 14px "IBM Plex Sans", sans-serif;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  transition: background-color 0.15s, color 0.15s;
 }
-@media (max-width: 380px) {
-  .navbtn { font-size: 10px; padding: 6px 1px; }
+.navbtn svg { flex: none; }
+.navbtn.active {
+  background: var(--green-deep);
+  color: #fff;
+  padding: 0 16px;
 }
-.navbtn.active { color: var(--flag); }
-.navbtn .dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
-.navbtn.active .dot { background: var(--flag); }
+:root[data-theme="dark"] .navbtn.active {
+  background: var(--green-mid);
+  color: #101512;
+}
 
 /* --- Rows ------------------------------------------------------- */
 
@@ -621,3 +624,14 @@ label {
   color: var(--ink);
   font-size: 17px;
 }
+
+/* A text-only button for small inline actions ("+ Add course", "Edit"). */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 10px 4px;
+  font: 600 14px "IBM Plex Sans", sans-serif;
+  color: var(--flag);
+  cursor: pointer;
+}
+.link-btn.muted-link { color: var(--ink-soft); font-weight: 500; font-size: 13px; }

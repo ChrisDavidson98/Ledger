@@ -183,7 +183,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26d';
+const BUILD = '2026-09-26e';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -285,13 +285,25 @@ function notices() {
   return html;
 }
 
+/*
+ * Five tabs, icons only, with the current one opening into a pill that
+ * carries its name. Courses lost its tab: it is opened when starting a
+ * round, or from Settings, which is when anybody actually needs it.
+ */
+const NAV_ICON_PATHS = {
+  home: '<path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  history: '<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/>',
+  stats: '<path d="M5 20v-8M12 20V5M19 20v-11"/>',
+  clubhouse: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M9 20h6"/>',
+};
+
 const NAV = [
   { key: 'home', label: 'Play' },
   { key: 'calendar', label: 'Diary' },
   { key: 'history', label: 'Rounds' },
   { key: 'stats', label: 'Stats' },
   { key: 'clubhouse', label: 'Club' },
-  { key: 'courses', label: 'Courses' },
 ];
 
 const NAV_GROUPS = {
@@ -300,15 +312,24 @@ const NAV_GROUPS = {
   history: ['history', 'detail', 'settings', 'repair'],
   stats: ['stats'],
   clubhouse: ['clubhouse'],
-  courses: ['courses', 'courseEdit', 'courseImport'],
 };
+
+/** Course screens belong to whichever tab opened them. */
+function navGroupOf(screen) {
+  if (['courses', 'courseEdit', 'courseImport'].includes(screen)) {
+    return courseHome() === 'setup' ? 'home' : 'history';
+  }
+  return NAV.find((tab) => NAV_GROUPS[tab.key].includes(screen))?.key || null;
+}
 
 function renderNav() {
   if (STATE.screen === 'login') return '';
+  const current = navGroupOf(STATE.screen);
   return NAV.map((tab) => {
-    const active = NAV_GROUPS[tab.key].includes(STATE.screen);
-    return `<button class="navbtn ${active ? 'active' : ''}" data-nav="${tab.key}">
-      <span class="dot"></span>${tab.label}
+    const active = tab.key === current;
+    const icon = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICON_PATHS[tab.key]}</svg>`;
+    return `<button class="navbtn ${active ? 'active' : ''}" data-nav="${tab.key}" aria-label="${tab.label}"${active ? ' aria-current="page"' : ''}>
+      ${icon}${active ? `<span>${tab.label}</span>` : ''}
     </button>`;
   }).join('');
 }
@@ -427,12 +448,24 @@ function screenHome() {
     </div>`;
 }
 
+/**
+ * Where the course screens hand back to. Courses has no tab of its
+ * own: opened from New Round it returns there, from Settings it
+ * returns to the full list.
+ */
+function courseHome() {
+  return STATE.courseReturn === 'setup' ? 'setup' : 'courses';
+}
+
 function screenSetup() {
   const courses = listCourses();
   return `${topbar('New Round')}
     ${notices()}
     <div class="card">
-      <h2>Choose a course</h2>
+      <div class="split">
+        <h2>Choose a course</h2>
+        ${courses.length ? '<button class="link-btn" data-action="new-course">+ Add course</button>' : ''}
+      </div>
       ${courses.length === 0 ? `
         <div class="empty">
           <div class="glyph">&#9971;</div>
@@ -441,20 +474,20 @@ function screenSetup() {
         <button class="btn-primary" data-action="new-course">Add a Course</button>
       ` : `
         ${courses.map((c) => `
-          <button class="row" data-action="pick-course" data-id="${esc(c.id)}">
-            <div class="badge">${c.nines.length * 9}</div>
-            <div class="row-meta">
-              <div class="rname">${esc(c.name)}</div>
-              <div class="rsub">${esc(c.teeNames.join(' · '))}</div>
-            </div>
-            <div class="row-val">&rsaquo;</div>
-          </button>
+          <div class="row" style="padding:0">
+            <button class="row" style="flex:1;border:none" data-action="pick-course" data-id="${esc(c.id)}">
+              <div class="badge">${c.nines.length * 9}</div>
+              <div class="row-meta">
+                <div class="rname">${esc(c.name)}</div>
+                <div class="rsub">${isIncomplete(c) ? '<span class="sg-neg">needs fixing</span>' : esc(c.teeNames.join(' · '))}</div>
+              </div>
+            </button>
+            <button class="link-btn muted-link" data-action="edit-course" data-id="${esc(c.id)}">Edit</button>
+          </div>
         `).join('')}
-        <div class="btn-row">
-          <button class="btn-ghost" data-action="new-course">Add a Course</button>
-        </div>
       `}
-    </div>`;
+    </div>
+    <p class="tiny" style="text-align:center">Every course, plus importing from a photo, is also under Rounds &rsaquo; Settings &rsaquo; Courses.</p>`;
 }
 
 function screenPickTee() {
@@ -1030,6 +1063,15 @@ function screenSettings() {
 
   return `${topbar('Settings')}
     ${notices()}
+    <div class="card">
+      <button class="row" style="border:none;padding:0" data-action="open-courses">
+        <div class="row-meta">
+          <div class="rname">Courses</div>
+          <div class="rsub">Saved scorecards, add by hand or from a photo</div>
+        </div>
+        <div class="row-val">&rsaquo;</div>
+      </button>
+    </div>
     <div class="card">
       <h2>Google Sheet backend</h2>
       <p class="muted">Paste the Web App URL from your Apps Script deployment and the shared secret you set on it. Setup steps are in <span class="mono">apps-script/README.md</span>.</p>
@@ -3003,7 +3045,8 @@ function screenCourses() {
         </div>
         <p class="tiny">${esc(pendingSeeds.map((c) => c.name).join(', '))} &mdash; transcribed from the paper scorecard.</p>
       ` : ''}
-    </div>`;
+    </div>
+    <button class="btn-ghost" data-action="${courseHome() === 'setup' ? 'goto-setup-courses' : 'goto-settings'}">&larr; Back</button>`;
 }
 
 function screenCourseEdit() {
@@ -3522,7 +3565,7 @@ function saveCourseDraft() {
 
   course.persisted = true;
   upsertCourse(course);
-  go('courses', {
+  go(courseHome(), {
     courseDraft: null,
     courseForce: false,
     notice: `Saved ${course.name}. ${tee} tees are complete.`,
@@ -4194,7 +4237,9 @@ const ACTIONS = {
   },
   'goto-setup': () => go('setup', { setupCourseId: null }),
   'goto-history': () => go('history'),
-  'goto-courses': () => go('courses', { courseDraft: null }),
+  'goto-courses': () => go(courseHome(), { courseDraft: null }),
+  'goto-setup-courses': () => go('setup', { courseDraft: null }),
+  'open-courses': () => go('courses', { courseDraft: null, courseReturn: 'courses' }),
   'pick-course': (el) => go('setup', {
     setupCourseId: el.getAttribute('data-id'), setupTee: null,
   }),
@@ -4307,7 +4352,7 @@ const ACTIONS = {
     }
 
     upsertCourse(course);
-    go('courses', {
+    go(courseHome(), {
       importText: '', importPreview: null, importCourse: null, importForce: false,
       notice: `Saved ${course.name}. Open it and mark it checked once you have compared it to the card.`,
     });
@@ -4425,19 +4470,21 @@ const ACTIONS = {
   'load-seeds': () => {
     const pending = missingSeeds(listCourses());
     pending.forEach((course) => upsertCourse(cloneSeed(course)));
-    go('courses', {
+    go(courseHome(), {
       notice: `Loaded ${pending.map((c) => c.name).join(', ')}.`,
     });
   },
 
   'new-course': () => go('courseEdit', {
     courseDraft: newCourse(''), courseTeeIdx: 0, courseNineIdx: 0, comboDraft: null,
+    ...(STATE.screen === 'setup' ? { courseReturn: 'setup' } : {}),
   }),
 
   'edit-course': (el) => {
     const course = safeCourse(el.getAttribute("data-id"));
     if (!course) return;
     go('courseEdit', {
+      ...(STATE.screen === 'setup' ? { courseReturn: 'setup' } : {}),
       courseDraft: JSON.parse(JSON.stringify({ ...course, persisted: true })),
       courseTeeIdx: 0,
       courseNineIdx: 0,
@@ -4496,7 +4543,7 @@ const ACTIONS = {
   'delete-course': (el) => {
     if (!confirm('Delete this course? Saved rounds are not affected.')) return;
     store.deleteCourse(el.getAttribute('data-id'));
-    go('courses', { courseDraft: null });
+    go(courseHome(), { courseDraft: null });
   },
   export: exportData,
 };
