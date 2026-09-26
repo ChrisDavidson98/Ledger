@@ -97,7 +97,7 @@ import * as sync from './sync.js';
 import { missingSeeds, cloneSeed } from './seed.js';
 import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js';
 import { recapData, drawRecap, shareRecap } from './recap.js';
-import { practiceFocus, bookedFocus } from './practice.js';
+import { practiceFocus, bookedFocus, gameProfile } from './practice.js';
 import { standings } from './standings.js';
 import { planRepair, describePlan } from './repair.js';
 import {
@@ -183,7 +183,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26h';
+const BUILD = '2026-09-26i';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -243,7 +243,7 @@ function sgClass(v) {
 
 function fmtToPar(diff) {
   if (diff === 0) return 'E';
-  return diff > 0 ? '+' + diff : String(diff);
+  return diff > 0 ? '+' + diff : '−' + Math.abs(diff);
 }
 
 function fmtDist(dist, unit) {
@@ -323,7 +323,8 @@ function navGroupOf(screen) {
 }
 
 function renderNav() {
-  if (STATE.screen === 'login') return '';
+  // Hidden mid-hole: the shot buttons sit where the tab bar would.
+  if (STATE.screen === 'login' || STATE.screen === 'play') return '';
   const current = navGroupOf(STATE.screen);
   return NAV.map((tab) => {
     const active = tab.key === current;
@@ -405,46 +406,33 @@ function screenHome() {
   const round = STATE.round;
   const resumable = round && !isRoundComplete(round);
   const rounds = playerRounds();
-  const last = rounds[0];
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-  return `${topbar(STATE.player)}
+  return `${topbar(`${STATE.player} · ${today}`)}
     ${notices()}
     ${renderInviteBanner()}
     ${renderScheduleBanner()}
-    ${resumable ? '' : renderPracticeFocus()}
     ${resumable ? `
       <div class="card">
-        <h2>Round in progress</h2>
-        <p class="muted">${esc(round.courseName)} &mdash; ${esc(round.teeName)} tees<br>
-        Through ${playedHoles(round).length} holes, ${fmtToPar(roundToPar(round))}</p>
-        <div class="fairway-divider"></div>
-        <button class="btn-flag" data-action="resume">Continue &mdash; Hole ${STATE.holeIdx + 1}</button>
-        <div class="btn-row">
+        <div class="eyebrow">Round in progress</div>
+        <h2 style="margin:6px 0 4px">${esc(round.courseName)}</h2>
+        <p class="mono" style="font-size:11px;color:var(--text-2);margin:0">${esc(round.teeName).toUpperCase()} TEES &middot; THRU ${playedHoles(round).length} &middot; ${fmtToPar(roundToPar(round))}</p>
+        <div class="btn-row" style="margin-top:12px">
           <button class="btn-danger" data-action="discard-round">Discard Round</button>
         </div>
-      </div>` : `
-      <div class="card">
-        <h2>Start a round</h2>
-        <p class="muted">Pick a course you have saved, or add a new scorecard.</p>
-        <button class="btn-primary" data-action="goto-setup">New Round</button>
-      </div>`}
-
-    ${last ? `
-      <div class="card">
-        <h2>Last round</h2>
-        <button class="row" data-action="view-round" data-id="${esc(last.id)}">
-          <div class="badge">${fmtToPar(roundToPar(last))}</div>
-          <div class="row-meta">
-            <div class="rname">${esc(last.courseName)}</div>
-            <div class="rsub">${fmtDate(last.date)} &middot; ${esc(last.teeName)}</div>
-          </div>
-          <div class="row-val ${sgClass(roundTotals(last, bench()).total)}">${fmtSG(roundTotals(last, bench()).total)}</div>
-        </button>
       </div>` : ''}
-
-    <div class="card">
-      <h2>How this works</h2>
-      <p class="muted">Every shot is measured against the strokes a tour player would expect to need from the same lie and distance. Beat that number and you gain; fall short and you lose. Totals break down into tee shots, approaches, short game and putting &mdash; so you can see which part of the round actually cost you.</p>
+    ${renderBook()}
+    ${renderDiaryStrip()}
+    ${rounds.length ? '' : `
+      <div class="card">
+        <div class="eyebrow">How this works</div>
+        <p class="muted" style="margin-top:8px">Every shot is measured against the strokes a tour player would expect to need from the same lie and distance. Beat that number and you gain; fall short and you lose. Totals break down into tee shots, approaches, short game and putting &mdash; so you can see which part of the round actually cost you.</p>
+      </div>`}
+    <div class="dock-space"></div>
+    <div class="dock">
+      ${resumable
+        ? `<button class="btn-primary" data-action="resume">Continue &middot; Hole ${STATE.holeIdx + 1} &rarr;</button>`
+        : `<button class="btn-primary" data-action="goto-setup">Start a round &rarr;</button>`}
     </div>`;
 }
 
@@ -618,13 +606,26 @@ function screenScoreCard() {
     </div>`;
 }
 
+/* --- Shot entry ----------------------------------------------------
+   One hole on one screen: the hole drawn as a ruler from tee to pin
+   with the ball's path on it, the shots so far as ruled rows, then the
+   form for the next one with its two buttons in thumb reach. The tab
+   bar is hidden here — mid-hole is not the moment to wander off.
+------------------------------------------------------------------ */
+
+const LIE_CODES = { tee: 'TEE', fairway: 'FWY', rough: 'RGH', sand: 'SND', recovery: 'TRB', green: 'GRN' };
+
+/** A distance as yards from the pin, whatever unit it was logged in. */
+function yardsToPin(dist, unit) {
+  return unit === 'ft' ? Number(dist) / 3 : Number(dist);
+}
+
 function screenPlay() {
   const round = STATE.round;
   if (!round) return screenHome();
   const hole = round.holes[STATE.holeIdx];
   const editing = STATE.editShotIdx != null && hole.shots[STATE.editShotIdx];
   const played = playedHoles(round).length;
-  const pct = Math.round((played / round.holes.length) * 100);
 
   // When editing, the form describes the shot being changed rather
   // than the next one to be played.
@@ -644,64 +645,129 @@ function screenPlay() {
     startDist: start.dist,
     startUnit: start.unit,
   });
+  const showForm = STATE.editShotIdx != null || !hole.done;
+  // Score through finished holes only: a hole in progress would read
+  // as three under after the tee shot.
+  const finished = round.holes.filter((h) => h.done);
+  const toPar = finished.reduce((sum, h) => sum + holeScore(h) - h.par, 0);
 
-  return `${topbar(`${round.courseName} · ${round.teeName}`)}
-    ${notices()}
-    <div class="card">
-      <div class="progress">
-        <button class="mono muted" data-action="toggle-hole-picker"
-                style="background:none;border:none;padding:0;min-height:0;text-decoration:underline;font-size:13px">Hole ${hole.hole}/${round.holes.length}</button>
-        <div class="track"><div class="fill" style="width:${pct}%"></div></div>
-        <span class="mono muted">${fmtToPar(roundToPar(round))}</span>
+  return `<header class="topbar hole-head">
+      <button class="hole-no" data-action="toggle-hole-picker" aria-label="Hole ${hole.hole} of ${round.holes.length}. Jump to another hole">
+        <span class="hole-num">No. ${hole.hole}</span>
+        <span class="hole-meta">PAR ${hole.par} &middot; ${hole.yards}</span>
+      </button>
+      <div class="hole-score">
+        <div class="hole-topar">${fmtToPar(toPar)}</div>
+        <div class="hole-thru">thru ${finished.length}</div>
       </div>
-      ${hole.sourceNine && hole.sourceHole !== hole.hole
-        ? `<p class="tiny" style="margin:-4px 0 8px">${esc(hole.sourceNine)} hole ${hole.sourceHole}</p>` : ''}
-      <div class="stat-grid g4">
-        <div class="stat-box"><div class="val">${hole.par}</div><div class="lbl">Par</div></div>
-        <div class="stat-box"><div class="val">${hole.yards}</div><div class="lbl">Yards</div></div>
-        <div class="stat-box"><div class="val">${holeScore(hole)}</div><div class="lbl">Strokes</div></div>
-        <div class="stat-box"><div class="val ${sgClass(holeTotals(hole, bench()).total)}">${fmtSG(holeTotals(hole, bench()).total)}</div><div class="lbl">SG</div></div>
+    </header>
+    ${notices()}
+    ${STATE.holePicker ? renderHolePicker(round) : ''}
+
+    <div class="card" style="border-top:none;padding-top:14px">
+      <div class="eyebrow">${esc(round.courseName)}${hole.sourceNine && hole.sourceHole !== hole.hole
+        ? ` &middot; ${esc(hole.sourceNine)} ${hole.sourceHole}` : ''} &middot; yards to pin</div>
+      ${renderHoleRuler(hole)}
+      <div class="shot-log">
+        ${hole.shots.map((s, i) => renderShotLine(s, hole, i)).join('')}
+        ${showForm && !editing ? renderPendingLine(hole, start, shotNum) : ''}
       </div>
     </div>
 
-    ${STATE.holePicker ? renderHolePicker(round) : ''}
+    ${showForm ? renderShotForm(hole, start, category, shotNum) : renderHoleComplete(hole)}
 
-    ${hole.shots.length ? `
-      <div class="card">
-        <div class="split"><h3>Shots</h3>
-          <button class="chip" data-action="undo-shot" style="min-height:36px;padding:6px 12px">Undo last</button>
-        </div>
-        <p class="tiny">Tap a shot to change or remove it. Everything after it re-links itself.</p>
-        ${hole.shots.map((s, i) => renderShotLine(s, hole, i)).join('')}
+    ${played > 0 && !hole.done && !editing ? `
+      <div style="text-align:center;margin:4px 0 8px">
+        <button class="link-btn muted-link" data-action="end-round">End round here</button>
       </div>` : ''}
+    ${STATE.sheet ? renderSheet(category) : ''}`;
+}
 
-    ${STATE.editShotIdx != null
-      ? renderShotForm(hole, start, category, shotNum)
-      : hole.done ? renderHoleComplete(hole) : renderShotForm(hole, start, category, shotNum)}
+/**
+ * The hole from tee (left) to pin (right), ticked every 100 yards to
+ * the pin. Each shot is a dashed run to where the ball finished, and
+ * the ball's current spot is a ring with the distance still to go.
+ */
+function renderHoleRuler(hole) {
+  const W = 340;
+  const x0 = 10;
+  const x1 = W - 14;
+  const length = Math.max(Number(hole.yards) || 0, 1);
+  const pos = (yards) => x0 + (1 - Math.min(Math.max(yards, 0), length) / length) * (x1 - x0);
+  const lineY = 34;
 
-    ${played > 0 && !hole.done ? `
-      <button class="btn-ghost" data-action="end-round">End Round Here</button>` : ''}`;
+  const ticks = [];
+  for (let t = 100; t < length; t += 100) ticks.push(t);
+
+  const segments = [];
+  let from = length;
+  hole.shots.forEach((s) => {
+    const to = s.holed ? 0 : yardsToPin(s.endDist, s.endUnit);
+    segments.push({ from, to });
+    from = to;
+  });
+  const lastShot = hole.shots[hole.shots.length - 1];
+  const ball = hole.done || !hole.shots.length || (lastShot && lastShot.holed)
+    ? null
+    : { x: pos(yardsToPin(lastShot.endDist, lastShot.endUnit)), label: fmtDist(lastShot.endDist, lastShot.endUnit).replace(/y$/, '') };
+
+  return `<svg viewBox="0 0 ${W} 64" style="width:100%;height:auto;display:block;margin:10px 0 6px" role="img"
+      aria-label="Hole ${hole.hole}, ${length} yards. ${ball ? `${ball.label} to go.` : hole.done ? 'Holed.' : 'On the tee.'}">
+    <line x1="${x0}" y1="${lineY}" x2="${x1}" y2="${lineY}" stroke="var(--rule-strong)" stroke-width="1.5"/>
+    ${ticks.map((t) => `
+      <line x1="${pos(t)}" y1="${lineY - 4}" x2="${pos(t)}" y2="${lineY + 4}" stroke="var(--rule-strong)" stroke-width="1"/>
+      <text x="${pos(t)}" y="${lineY + 20}" text-anchor="middle" font-size="9.5"
+        font-family="Martian Mono, monospace" fill="var(--text-2)">${t}</text>`).join('')}
+    <text x="${x0}" y="${lineY + 20}" text-anchor="start" font-size="9.5"
+      font-family="Martian Mono, monospace" fill="var(--text-2)">${length}</text>
+    ${segments.map((s) => `
+      <line x1="${pos(s.from)}" y1="${lineY - 3}" x2="${pos(s.to)}" y2="${lineY - 3}"
+        stroke="var(--gain)" stroke-width="2" stroke-dasharray="5 4"/>`).join('')}
+    <rect x="${x0 - 5}" y="${lineY - 5}" width="10" height="10" fill="var(--text)"/>
+    <line x1="${x1}" y1="${lineY}" x2="${x1}" y2="${lineY - 22}" stroke="var(--loss)" stroke-width="2"/>
+    <path d="M${x1} ${lineY - 22} h10 v8 h-10 z" fill="var(--loss)"/>
+    ${ball ? `
+      <circle cx="${ball.x}" cy="${lineY}" r="6.5" fill="var(--bg)" stroke="var(--gain)" stroke-width="2.5"/>
+      <text x="${ball.x}" y="${lineY - 14}" text-anchor="middle" font-size="11" font-weight="600"
+        font-family="Martian Mono, monospace" fill="var(--gain)">${esc(ball.label)}</text>` : ''}
+  </svg>`;
+}
+
+function shotRoute(startLie, startDist, startUnit, end) {
+  return `${LIE_CODES[startLie] || ''} ${fmtDist(startDist, startUnit).replace(/y$/, '')} &rarr; ${end}`;
 }
 
 function renderShotLine(shot, hole, index) {
-  const { category, sg } = shotSG(shot, hole.par, bench());
-  const from = `${LIE_LABELS[shot.startLie]} ${fmtDist(shot.startDist, shot.startUnit)}`;
-  const to = shot.holed
-    ? 'holed'
-    : `${LIE_LABELS[shot.endLie]} ${fmtDist(shot.endDist, shot.endUnit)}`;
+  const { sg } = shotSG(shot, hole.par, bench());
+  const end = shot.holed
+    ? 'HOLED'
+    : `${LIE_CODES[shot.endLie] || ''} ${fmtDist(shot.endDist, shot.endUnit).replace(/y$/, '')}`;
   const extras = [];
   if (shot.miss && shot.miss !== 'target') extras.push(MISS_LABELS[shot.miss]);
   if (shot.penalty) extras.push(`+${shot.penalty} pen`);
   const editing = STATE.editShotIdx === index;
 
-  return `<button class="shot-line" data-edit-shot="${index}"
-    style="width:100%;border:none;border-radius:0;background:${editing ? 'var(--cream)' : 'none'};text-align:left;min-height:0">
-    <span class="desc">
-      <strong class="mono">${shot.n}</strong>&nbsp; ${esc(from)} &rarr; ${esc(to)}
-      <span class="tiny">${CATEGORY_SHORT[category]}${extras.length ? ' &middot; ' + esc(extras.join(' · ')) : ''}</span>
-    </span>
-    <span class="mono ${sgClass(sg)}">${fmtSG(sg)}</span>
+  return `<button class="shot-line${editing ? ' is-editing' : ''}" data-edit-shot="${index}" aria-label="Shot ${shot.n}. Tap to change it.">
+    <span class="sl-n">${shot.n}</span>
+    <span class="sl-club">${esc(shot.club || '')}</span>
+    <span class="sl-route">${shotRoute(shot.startLie, shot.startDist, shot.startUnit, end)}${
+      extras.length ? `<span class="sl-extra">${esc(extras.join(' · '))}</span>` : ''}</span>
+    <span class="sl-sg ${sgClass(sg)}">${fmtSG(sg)}</span>
   </button>`;
+}
+
+/** The shot being entered, dimmed, so the log reads as a sentence being finished. */
+function renderPendingLine(hole, start, shotNum) {
+  const draft = STATE.draft;
+  const end = draft.endLie === 'holed'
+    ? 'HOLED'
+    : draft.endLie ? `${LIE_CODES[draft.endLie]}${isValidDist(draft.endDist) ? ' ' + Math.round(draft.endDist) + (unitForLie(draft.endLie) === 'ft' ? 'ft' : '') : ''}` : '&hellip;';
+  return `<div class="shot-line is-pending">
+    <span class="sl-n">${shotNum}</span>
+    <span class="sl-club">${esc(draft.club || '')}</span>
+    <span class="sl-route">${shotRoute(start.lie, start.dist, start.unit, end)}</span>
+    <span class="sl-sg">&mdash;</span>
+  </div>`;
 }
 
 /**
@@ -722,7 +788,7 @@ function renderHolePicker(round) {
         return `<button class="chip ${i === STATE.holeIdx ? 'active' : ''}" data-goto-hole="${i}"
           style="flex-direction:column;gap:0;padding:6px 2px">
           ${h.hole}
-          <span class="tiny" style="${i === STATE.holeIdx ? 'color:var(--cream)' : ''}">${
+          <span class="tiny" style="${i === STATE.holeIdx ? 'color:var(--primary-ink)' : ''}">${
             played ? fmtToPar(score - h.par) : '·'
           }</span>
         </button>`;
@@ -761,67 +827,90 @@ function renderShotForm(hole, start, category, shotNum) {
   const unit = endLie && endLie !== 'holed' ? unitForLie(endLie) : null;
   const needsDist = endLie && endLie !== 'holed';
   const ready = endLie && (!needsDist || isValidDist(draft.endDist));
+  const clubs = store.trackClubs() && category === 'app';
+  const misses = tracksMiss(category);
+  const penalty = Number(draft.penalty || 0);
 
-  const startLabel = `${LIE_LABELS[start.lie]}, ${fmtDist(start.dist, start.unit)} out`;
-
-  return `<div class="card">
-    <div class="split">
-      <h2>${editing ? `Edit shot ${shotNum}` : `Shot ${shotNum}`}</h2>
-      <span class="tiny">${CATEGORY_LABELS[category]}</span>
+  return `<div class="card" style="padding-top:12px">
+    <div class="split" style="align-items:baseline">
+      <h2 style="font-size:30px;margin:0">${editing ? `Editing shot ${shotNum}&hellip;` : `Shot ${shotNum} finished&hellip;`}</h2>
+      <span class="eyebrow">${esc(CATEGORY_LABELS[category])}</span>
     </div>
-    <p class="muted">From ${esc(startLabel)}.</p>
-    ${editing ? `<p class="tiny">Changing this re-links every later shot on the hole.</p>` : ''}
+    ${editing ? `<p class="tiny" style="margin:4px 0 0">Changing this re-links every later shot on the hole.</p>` : ''}
 
-    <label>Where did it finish?</label>
-    <div class="chip-grid">
-      ${['fairway', 'rough', 'sand', 'green', 'recovery'].map((lie) => `
-        <button class="chip ${endLie === lie ? 'active' : ''}" data-lie="${lie}">${LIE_LABELS[lie]}</button>
+    <div class="lie-grid" role="group" aria-label="Where did it finish?">
+      ${['fairway', 'rough', 'sand', 'recovery', 'green'].map((lie) => `
+        <button class="lie-cell ${endLie === lie ? 'active' : ''}" data-lie="${lie}" aria-pressed="${endLie === lie}">${LIE_LABELS[lie]}</button>
       `).join('')}
-      <button class="chip flag ${endLie === 'holed' ? 'active' : ''}" data-lie="holed">Holed</button>
+      <button class="lie-cell holed ${endLie === 'holed' ? 'active' : ''}" data-lie="holed" aria-pressed="${endLie === 'holed'}">Holed</button>
     </div>
 
     ${needsDist ? `
-      <label>Distance left to the hole (${unit === 'ft' ? 'feet' : 'yards'})</label>
-      <input type="number" inputmode="decimal" id="distInput" class="big-number-input"
-             placeholder="${unit === 'ft' ? '18' : '120'}" value="${draft.endDist == null ? '' : esc(draft.endDist)}">
+      <div class="stepper">
+        <button data-dist-step="-1" aria-label="Less">&minus;</button>
+        <label class="stepper-mid" for="distInput">
+          <span class="eyebrow">${unit === 'ft' ? 'Feet' : 'Yards'} to pin</span>
+          <input type="number" inputmode="decimal" id="distInput" class="stepper-input"
+                 placeholder="${unit === 'ft' ? '18' : '120'}" value="${draft.endDist == null ? '' : esc(draft.endDist)}">
+        </label>
+        <button data-dist-step="1" aria-label="More">+</button>
+      </div>
       ${store.usePresets() ? renderPresets(unit, draft.endDist) : ''}
     ` : ''}
 
-    ${store.trackClubs() && category === 'app' ? `
-      <label>Club <span class="tiny" style="text-transform:none;letter-spacing:0">optional</span></label>
-      <div class="chip-grid" style="grid-template-columns:repeat(5,1fr);gap:6px">
-        ${CLUBS.map((club) => `
-          <button class="chip ${draft.club === club ? 'active' : ''}" data-club="${club}"
-                  style="padding:8px 0;font-size:12px;min-height:40px">${club}</button>
-        `).join('')}
-      </div>
-    ` : ''}
-
-    ${tracksMiss(category) ? `
-      <label>Where did you miss? <span class="tiny" style="text-transform:none;letter-spacing:0">optional</span></label>
-      <div class="miss-grid">
-        ${MISS_GRID.flat().map((dir) => `
-          <button class="miss-cell ${dir === 'target' ? 'center' : ''} ${draft.miss === dir ? 'active' : ''}"
-                  data-miss="${dir}">${dir === 'target' ? 'Hit it' : MISS_LABELS[dir]}</button>
-        `).join('')}
-      </div>` : ''}
-
-    <label>Penalty strokes</label>
-    <div class="chip-grid">
-      ${[0, 1, 2].map((n) => `
-        <button class="chip ${(draft.penalty || 0) === n ? 'active' : ''}" data-penalty="${n}">${n === 0 ? 'None' : '+' + n}</button>
-      `).join('')}
+    <div class="field-row">
+      ${clubs ? `
+        <button class="field" data-action="open-sheet" data-sheet="club">
+          <span class="eyebrow">Club</span><strong>${esc(draft.club || '—')}</strong>
+        </button>` : ''}
+      ${misses ? `
+        <button class="field" data-action="open-sheet" data-sheet="miss">
+          <span class="eyebrow">Miss</span><strong>${esc(draft.miss ? (draft.miss === 'target' ? 'Hit it' : MISS_LABELS[draft.miss]) : '—')}</strong>
+        </button>` : ''}
+      <button class="field ${penalty ? 'has-penalty' : ''}" data-action="cycle-penalty" aria-label="Penalty strokes: ${penalty}. Tap to change.">
+        <span class="eyebrow">${penalty ? 'Penalty' : '+ Penalty'}</span><strong>${penalty ? `+${penalty}` : ''}</strong>
+      </button>
     </div>
 
-    <button class="btn-flag" style="margin-top:14px" id="saveShot" data-action="save-shot" ${ready ? '' : 'disabled'}>
-      ${editing ? 'Update Shot' : 'Save Shot'}
-    </button>
     ${editing ? `
-      <div class="btn-row">
-        <button class="btn-ghost" data-action="cancel-edit">Cancel</button>
-        <button class="btn-danger" data-action="delete-shot">Delete Shot</button>
+      <div style="text-align:right;margin-top:6px">
+        <button class="link-btn" data-action="delete-shot">Delete shot</button>
       </div>` : ''}
+  </div>
+  <div class="dock-space"></div>
+  <div class="dock dock-play">
+    ${editing
+      ? '<button class="btn-ghost" data-action="cancel-edit">Cancel</button>'
+      : `<button class="btn-ghost" data-action="undo-shot" ${hole.shots.length ? '' : 'disabled'}>Undo</button>`}
+    <button class="btn-primary" id="saveShot" data-action="save-shot" ${ready ? '' : 'disabled'}>
+      ${editing ? `Update shot ${shotNum}` : `Log shot ${shotNum} &rarr;`}
+    </button>
   </div>`;
+}
+
+/** Club and miss choices, as a sheet from the bottom of the screen. */
+function renderSheet(category) {
+  const draft = STATE.draft;
+  const body = STATE.sheet === 'club'
+    ? `<div class="chip-grid" style="grid-template-columns:repeat(5,1fr);gap:6px">
+        ${CLUBS.map((club) => `
+          <button class="chip ${draft.club === club ? 'active' : ''}" data-club="${club}"
+                  style="padding:8px 0;font-size:13px">${club}</button>`).join('')}
+      </div>`
+    : `<div class="miss-grid" style="margin:8px auto">
+        ${MISS_GRID.flat().map((dir) => `
+          <button class="miss-cell ${dir === 'target' ? 'center' : ''} ${draft.miss === dir ? 'active' : ''}"
+                  data-miss="${dir}">${dir === 'target' ? 'Hit it' : MISS_LABELS[dir]}</button>`).join('')}
+      </div>`;
+  return `<div class="sheet-backdrop" data-action="close-sheet"></div>
+    <div class="sheet" role="dialog" aria-label="${STATE.sheet === 'club' ? 'Club' : 'Where did you miss?'}">
+      <div class="split">
+        <h3 style="margin:0">${STATE.sheet === 'club' ? 'Club' : 'Where did you miss?'}</h3>
+        <button class="link-btn muted-link" data-action="close-sheet">Done</button>
+      </div>
+      ${body}
+      <p class="tiny" style="margin:8px 0 0">Optional. Tap again to clear.</p>
+    </div>`;
 }
 
 function renderHoleComplete(hole) {
@@ -1653,35 +1742,182 @@ function renderInviteBanner() {
   </div>`;
 }
 
+/* --- Home: the book on you ----------------------------------------
+   The recent game as a yardage book would put it: one headline number,
+   where each part of the game sits against it, and the one leak worth
+   fixing — with a session to book for it. It replaced the separate
+   practice card, which said the same thing at greater length.
+------------------------------------------------------------------ */
+
+const HANDICAP_WORDS = [
+  'scratch', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+  'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen',
+  'eighteen', 'nineteen', 'twenty', 'twenty-one', 'twenty-two', 'twenty-three',
+  'twenty-four', 'twenty-five', 'twenty-six', 'twenty-seven', 'twenty-eight',
+  'twenty-nine', 'thirty',
+];
+
+function handicapWords(value) {
+  const n = Math.round(value);
+  if (n <= 0) return 'scratch';
+  if (n > 30) return `${n > 36 ? '36+' : n}`;
+  return `a ${HANDICAP_WORDS[n]}`;
+}
+
 /**
- * "Go and practise this" — the weakest part of the recent game, with a
- * session to book. Silent until there are enough rounds to mean it.
+ * The scale: scratch to 30, a dot per part of the game, and the
+ * overall level as a marker. Dots that would sit on top of each other
+ * are nudged apart, and every label (the parts and "YOU") takes the
+ * lowest row above the line where it does not touch another.
  */
-function renderPracticeFocus() {
+function renderBookScale(profile) {
+  const W = 340;
+  const x0 = 8;
+  const x1 = W - 8;
+  const max = 30;
+  const at = (h) => x0 + (Math.min(Math.max(h, 0), max) / max) * (x1 - x0);
+  const charW = 7.4;
+  const rowH = 13;
+
+  const dots = profile.rows
+    .map((row) => ({ ...row, x: at(row.handicap), good: row.handicap <= profile.overall + 0.5 }))
+    .sort((a, b) => a.x - b.x);
+  dots.forEach((d, i) => {
+    if (i && d.x - dots[i - 1].x < 13) d.x = dots[i - 1].x + 13;
+  });
+
+  const you = at(profile.overall);
+  const labels = [
+    { text: `YOU ${Math.round(profile.overall)}`, x: you + 4, colour: 'var(--text)', weight: 600 },
+    ...dots.map((d) => ({ text: CATEGORY_SHORT_BOOK[d.category], x: d.x - 5, colour: d.good ? 'var(--gain)' : 'var(--loss)', weight: 500 })),
+  ];
+  const rows = [];
+  labels.forEach((l) => {
+    const width = l.text.length * charW;
+    l.x = Math.max(0, Math.min(l.x, W - width));
+    let tier = rows.findIndex((end) => l.x > end + 6);
+    if (tier === -1) { tier = rows.length; rows.push(-Infinity); }
+    rows[tier] = l.x + width;
+    l.tier = tier;
+  });
+
+  const top = rows.length * rowH + 6;
+  const lineY = top + 10;
+  const H = lineY + 24;
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;margin:8px 0 4px"
+      role="img" aria-label="Handicap level by part of the game, scratch to 30. Overall ${Math.round(profile.overall)}.">
+    <line x1="${x0}" y1="${lineY}" x2="${x1}" y2="${lineY}" stroke="var(--rule-strong)" stroke-width="1"/>
+    ${[0, 10, 20, 30].map((t) => `
+      <line x1="${at(t)}" y1="${lineY - 4}" x2="${at(t)}" y2="${lineY + 4}" stroke="var(--rule-strong)" stroke-width="1"/>
+      <text x="${at(t)}" y="${lineY + 19}" text-anchor="${t === 0 ? 'start' : t === max ? 'end' : 'middle'}"
+        font-size="9.5" font-family="Martian Mono, monospace" fill="var(--text-2)">${t === 0 ? 'scr' : t}</text>`).join('')}
+    <line x1="${you}" y1="${lineY - 16}" x2="${you}" y2="${lineY + 9}" stroke="var(--text)" stroke-width="2"/>
+    ${labels.map((l) => `
+      <text x="${l.x}" y="${top - l.tier * rowH - 4}" font-size="10" font-weight="${l.weight}"
+        font-family="Martian Mono, monospace" fill="${l.colour}">${l.text}</text>`).join('')}
+    ${dots.map((d) => `
+      <rect x="${d.x - 7}" y="${lineY - 7}" width="14" height="14" rx="5"
+        fill="${d.good ? 'var(--gain)' : 'var(--loss)'}" stroke="var(--bg)" stroke-width="1.5"/>`).join('')}
+  </svg>`;
+}
+
+const CATEGORY_SHORT_BOOK = { ott: 'Tee', app: 'Approach', arg: 'Short', putt: 'Putting' };
+
+function renderBook() {
+  const game = gameProfile(playerRounds());
+  if (!game) {
+    const have = sgRounds(playerRounds()).length;
+    return `<div class="card">
+      <div class="eyebrow">The book on you</div>
+      <h2 style="font-size:34px;margin:6px 0 8px">Still writing it.</h2>
+      <p class="muted">Log ${3 - have} more round${3 - have === 1 ? '' : 's'} shot by shot and this fills in: the handicap each part of your game plays like, and where the strokes are going.</p>
+    </div>`;
+  }
+
+  const { profile, per18, rounds } = game;
   const focus = practiceFocus(playerRounds());
-  if (!focus) return '';
-  const { plan } = focus;
-  const booked = bookedFocus(
-    visibleTeeTimes(store.getLiveTeeTimes(), STATE.player), plan.practiceType, todayKey()
-  );
-  const days = booked ? daysFromToday(booked.date) : null;
-  const when = booked ? (days === 0 ? 'today' : days === 1 ? 'tomorrow' : fmtDateKey(booked.date)) : '';
+  const rows = profile.rows.slice().sort((a, b) => b.handicap - a.handicap);
+
+  let booking = '';
+  if (focus) {
+    const booked = bookedFocus(
+      visibleTeeTimes(store.getLiveTeeTimes(), STATE.player), focus.plan.practiceType, todayKey()
+    );
+    const days = booked ? daysFromToday(booked.date) : null;
+    const when = booked ? (days === 0 ? 'today' : days === 1 ? 'tomorrow' : fmtDateKey(booked.date)) : '';
+    booking = booked
+      ? `<button class="row" data-action="view-tee-time" data-id="${esc(booked.id)}">
+          <div class="row-meta">
+            <div class="rname">${esc(focus.plan.practiceType)} booked ${esc(when)}</div>
+            <div class="rsub">Spend it on ${esc(focus.plan.title.toLowerCase())}</div>
+          </div>
+          <div class="row-val">&rsaquo;</div>
+        </button>`
+      : `<button class="row" data-action="book-focus">
+          <div class="row-meta">
+            <div class="rname">${esc(focus.plan.title)} &middot; ${focus.plan.minutes} min</div>
+            <div class="rsub">${esc(focus.plan.drill)}</div>
+          </div>
+          <div class="row-val sg-neg" style="white-space:nowrap">BOOK &rsaquo;</div>
+        </button>`;
+  }
 
   return `<div class="card">
-    <div class="split">
-      <h2>Practice focus</h2>
-      <span class="tiny">last ${focus.rounds} rounds</span>
+    <div class="eyebrow">The book on you &middot; ${rounds} rounds &middot; vs tour</div>
+    <h2 style="font-size:38px;margin:6px 0 2px">Plays like <em class="${profile.overall <= 18 ? 'sg-pos' : ''}" style="font-style:italic">${esc(handicapWords(profile.overall))}.</em></h2>
+    ${renderBookScale(profile)}
+    <div style="border-top:1px solid var(--rule-strong);margin-top:6px">
+      ${rows.map((row) => {
+        const good = row.handicap <= profile.overall + 0.5;
+        return `<div class="row" style="min-height:40px;padding:9px 0">
+          <div class="row-meta"><div class="rname" style="font-weight:500">${esc(CATEGORY_LABELS[row.category])}</div></div>
+          <div class="row-val ${sgClass(per18[row.category])}" style="width:64px;text-align:right">${fmtSG(per18[row.category])}</div>
+          <div class="row-val ${good ? 'sg-pos' : 'sg-neg'}" style="width:40px;text-align:right">${row.handicap <= 0.5 ? 'scr' : esc(fmtHandicapShort(row.handicap))}</div>
+        </div>`;
+      }).join('')}
     </div>
-    <p class="muted"><strong>${esc(CATEGORY_LABELS[focus.category])}</strong> is costing you about
-      <strong class="sg-neg">${focus.strokesPer18.toFixed(1)} strokes</strong> a round. It plays like a
-      ${esc(fmtHandicap(focus.handicap))} handicap against ${esc(fmtHandicap(focus.overall))} for the rest of your game.</p>
-    <div class="fairway-divider"></div>
-    <p style="margin:0 0 4px"><strong>${esc(plan.title)}</strong> &middot; ${plan.minutes} min</p>
-    <p class="tiny">${esc(plan.drill)}</p>
-    ${booked ? `
-      <p class="tiny">You have ${esc(plan.practiceType.toLowerCase())} booked ${esc(when)} &mdash; spend it on this.</p>
-      <button class="btn-ghost" data-action="view-tee-time" data-id="${esc(booked.id)}">See Session</button>` : `
-      <button class="btn-primary" data-action="book-focus" data-category="${esc(focus.category)}">Book a Session</button>`}
+    ${focus ? `
+      <p class="callout" style="margin:14px 0 6px">${esc(CATEGORY_LABELS[focus.category])} is the leak. Bring it to your own level and save about ${focus.strokesPer18.toFixed(1)} a round.</p>
+      ${booking}` : `
+      <p class="callout" style="margin:14px 0 0">No part of your game is dragging the rest. Keep doing what you are doing.</p>`}
+  </div>`;
+}
+
+/** Upcoming tee times and the last round, as ruled rows. */
+function renderDiaryStrip() {
+  const today = todayKey();
+  const upcoming = visibleSchedule()
+    .filter((t) => t.status === 'scheduled' && t.date >= today)
+    .slice(0, 3);
+  const last = playerRounds()[0];
+  if (!upcoming.length && !last) return '';
+
+  const dayLabel = (key) => {
+    const d = daysFromToday(key);
+    if (d === 0) return 'TODAY';
+    if (d === 1) return 'TMRW';
+    const date = new Date(`${key}T12:00:00`);
+    return `${date.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase()} ${date.getDate()}`;
+  };
+
+  return `<div class="card">
+    <div class="eyebrow" style="margin-bottom:4px">In the diary</div>
+    ${upcoming.map((t) => `
+      <button class="row" data-action="view-tee-time" data-id="${esc(t.id)}">
+        <span class="mono sg-pos" style="width:62px;font-size:11px;font-weight:600">${dayLabel(t.date)}</span>
+        <div class="row-meta"><div class="rname" style="font-weight:500">${esc(describeTeeTime(t))} <span style="color:var(--text-2)">&middot; ${esc(fmtTime(t.time))}</span></div></div>
+        <span class="mono" style="font-size:11px;color:var(--text-2)">${t.kind === 'practice' ? 'PR' : 'GO'}</span>
+      </button>`).join('')}
+    ${last ? (() => {
+      const sg = isScoreOnly(last) ? null : roundTotals(last, bench()).total;
+      return `<button class="row" data-action="view-round" data-id="${esc(last.id)}">
+        <span class="mono" style="width:62px;font-size:11px;font-weight:600;color:var(--text-2)">LAST</span>
+        <div class="row-meta"><div class="rname" style="font-weight:500">${esc(last.courseName)} <span style="color:var(--text-2)">&middot; ${esc(last.teeName)}</span></div></div>
+        <span class="mono" style="font-size:12px;font-weight:600">${fmtToPar(roundToPar(last))}</span>
+        ${sg == null ? '' : `<span class="mono ${sgClass(sg)}" style="font-size:12px;font-weight:600;width:52px;text-align:right">${fmtSG(sg)}</span>`}
+      </button>`;
+    })() : ''}
   </div>`;
 }
 
@@ -3392,6 +3628,7 @@ function playerRounds() {
 }
 
 function go(screen, extra = {}) {
+  STATE.sheet = null;
   STATE.error = null;
   STATE.notice = null;
   STATE.exportStatus = null;
@@ -4267,7 +4504,12 @@ const ACTIONS = {
     finishRound();
   },
 
-  'save-shot': saveShot,
+  'save-shot': () => { STATE.sheet = null; saveShot(); },
+  'open-sheet': (el) => { STATE.sheet = el.getAttribute('data-sheet'); render(); },
+  'close-sheet': () => { STATE.sheet = null; render(); },
+  // None, +1, +2, back to none: penalties are rare enough that one
+  // small control beats a row of three buttons on every shot.
+  'cycle-penalty': () => { STATE.draft.penalty = (Number(STATE.draft.penalty || 0) + 1) % 3; render(); },
   'delete-shot': deleteShot,
   'cancel-edit': () => { STATE.editShotIdx = null; STATE.draft = {}; render(); },
   'toggle-hole-picker': () => { STATE.holePicker = !STATE.holePicker; render(); },
@@ -4558,7 +4800,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window],[data-repair-course]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-dist-step],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window],[data-repair-course]');
   if (!target) return;
 
   const benchmark = target.getAttribute('data-benchmark');
@@ -4693,6 +4935,20 @@ function onClick(event) {
   const club = target.getAttribute('data-club');
   if (club) {
     STATE.draft.club = STATE.draft.club === club ? null : club;
+    STATE.sheet = null;
+    return render();
+  }
+
+  // − and + either side of the distance: a foot at a time on the
+  // green, five yards elsewhere. The number itself still takes typing.
+  const distStep = target.getAttribute('data-dist-step');
+  if (distStep) {
+    const unit = unitForLie(STATE.draft.endLie);
+    const step = unit === 'ft' ? 1 : 5;
+    const current = Number(STATE.draft.endDist);
+    const base = Number.isFinite(current) && current > 0 ? current : (unit === 'ft' ? 10 : 100);
+    const next = isValidDist(STATE.draft.endDist) ? base + Number(distStep) * step : base;
+    STATE.draft.endDist = String(Math.max(1, Math.round(next)));
     return render();
   }
 
@@ -4747,6 +5003,7 @@ function onClick(event) {
   const miss = target.getAttribute('data-miss');
   if (miss) {
     STATE.draft.miss = STATE.draft.miss === miss ? null : miss;
+    STATE.sheet = null;
     return render();
   }
 

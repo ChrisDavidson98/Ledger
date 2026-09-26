@@ -56,7 +56,12 @@ export const FOCUS_PLANS = {
  * not enough to say — too few rounds with shots, or no part of the game
  * lagging the rest by enough to be worth a session.
  */
-export function practiceFocus(rounds, { window = FOCUS_WINDOW, minRounds = FOCUS_MIN_ROUNDS } = {}) {
+/**
+ * The recent game as a handicap profile: strokes gained per 18 against
+ * tour, and the handicap each part of the game plays like. Null until
+ * there are enough rounds with shots to say anything.
+ */
+export function gameProfile(rounds, { window = FOCUS_WINDOW, minRounds = FOCUS_MIN_ROUNDS } = {}) {
   const recent = sgRounds(rounds || [])
     .filter((r) => playedHoles(r).length)
     .sort((a, b) => String(b.date).localeCompare(String(a.date)))
@@ -74,7 +79,13 @@ export function practiceFocus(rounds, { window = FOCUS_WINDOW, minRounds = FOCUS
   const scale = 18 / holes;
   Object.keys(per18).forEach((k) => { per18[k] *= scale; });
 
-  const profile = handicapProfile(per18);
+  return { per18, profile: handicapProfile(per18), rounds: recent.length };
+}
+
+export function practiceFocus(rounds, options = {}) {
+  const game = gameProfile(rounds, options);
+  if (!game) return null;
+  const { profile } = game;
   const weakest = profile.weakest;
   const upside = upsideFor(weakest);
   if (upside < MIN_UPSIDE) return null;
@@ -84,7 +95,7 @@ export function practiceFocus(rounds, { window = FOCUS_WINDOW, minRounds = FOCUS
     handicap: weakest.handicap,
     overall: profile.overall,
     strokesPer18: upside,
-    rounds: recent.length,
+    rounds: game.rounds,
     plan: FOCUS_PLANS[weakest.category],
   };
 }
