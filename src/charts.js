@@ -26,7 +26,7 @@
 
 import { CATEGORIES, CATEGORY_LABELS, CATEGORY_SHORT } from './baseline.js';
 
-const MONO = 'IBM Plex Mono, monospace';
+const MONO = 'Martian Mono, monospace';
 
 /** Positive is gained, negative is lost. Used for every bar fill. */
 function barColour(value) {

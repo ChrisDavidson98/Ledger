@@ -183,7 +183,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26e';
+const BUILD = '2026-09-26f';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -1403,7 +1403,7 @@ function screenCourseImport() {
     <div class="card">
       <label>Paste the result</label>
       <textarea id="importBox" rows="8" placeholder='{ "name": "...", "tees": [...], "nines": [...] }'
-        style="width:100%;padding:12px;border-radius:9px;border:1.5px solid var(--green-line);background:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--ink)">${esc(STATE.importText || '')}</textarea>
+        style="width:100%;padding:12px;border-radius:9px;border:1.5px solid var(--green-line);background:var(--paper);font-family:'Martian Mono',monospace;font-size:13px;color:var(--ink)">${esc(STATE.importText || '')}</textarea>
       <button class="btn-primary" style="margin-top:10px" data-action="preview-import">Check It</button>
     </div>
 
@@ -1789,14 +1789,14 @@ function renderGroupCard(board) {
       <span class="tiny">${board.length} card${board.length === 1 ? '' : 's'}</span>
     </div>
     <div class="card-editor">
-      <div class="hdr" style="grid-template-columns:1fr 44px 52px 56px">
+      <div class="hdr" style="grid-template-columns:minmax(0,1fr) 44px 52px 56px">
         <span>Player</span>
         <span style="text-align:center">Holes</span>
         <span style="text-align:center">Score</span>
         <span style="text-align:center">SG</span>
       </div>
       ${board.map((row) => `
-        <div class="line" style="grid-template-columns:1fr 44px 52px 56px">
+        <div class="line" style="grid-template-columns:minmax(0,1fr) 44px 52px 56px">
           <span><strong>${esc(row.player)}</strong></span>
           <span class="mono" style="text-align:center;font-size:12px">${row.holes}</span>
           <span class="mono" style="text-align:center;font-size:12px">${row.score} <span class="tiny">${fmtToPar(row.toPar)}</span></span>
@@ -2092,13 +2092,13 @@ function renderComparison() {
     <h2>Head to head</h2>
     <p class="muted">Strokes gained per 18 holes. The leader in each part of the game is marked.</p>
     <div class="card-editor">
-      <div class="hdr" style="grid-template-columns:1fr repeat(4,44px) 52px">
+      <div class="hdr" style="grid-template-columns:minmax(0,1fr) repeat(4,40px) 48px">
         <span>Player</span>
         ${CATEGORIES.map((c) => `<span style="text-align:center">${CATEGORY_SHORT[c]}</span>`).join('')}
         <span style="text-align:center">Tot</span>
       </div>
       ${rows.map((row) => `
-        <div class="line" style="grid-template-columns:1fr repeat(4,44px) 52px">
+        <div class="line" style="grid-template-columns:minmax(0,1fr) repeat(4,40px) 48px">
           <span>
             <strong>${esc(row.player)}</strong>
             <span class="tiny">${row.rounds} round${row.rounds === 1 ? '' : 's'}</span>
@@ -2202,12 +2202,12 @@ function renderTrendCard(allSeries, forcedKey) {
       <line x1="${padL}" y1="${zeroY}" x2="${W - padR}" y2="${zeroY}"
             stroke="var(--green-line)" stroke-width="1" stroke-dasharray="3 3"></line>
       <text x="${padL - 4}" y="${zeroY}" text-anchor="end" dominant-baseline="middle"
-            font-size="9" fill="var(--ink-faint)" font-family="IBM Plex Mono, monospace">0</text>
+            font-size="9" fill="var(--ink-faint)" font-family="Martian Mono, monospace">0</text>
       ${/* Skip an end label that would sit on top of the zero rule. */ ''}
       ${Math.abs(y(max) - y(0)) > 11 ? `<text x="${padL - 4}" y="${padT + 4}" text-anchor="end"
-            font-size="9" fill="var(--ink-faint)" font-family="IBM Plex Mono, monospace">${max.toFixed(0)}</text>` : ''}
+            font-size="9" fill="var(--ink-faint)" font-family="Martian Mono, monospace">${max.toFixed(0)}</text>` : ''}
       ${Math.abs(y(min) - y(0)) > 11 ? `<text x="${padL - 4}" y="${H - padB}" text-anchor="end"
-            font-size="9" fill="var(--ink-faint)" font-family="IBM Plex Mono, monospace">${min.toFixed(0)}</text>` : ''}
+            font-size="9" fill="var(--ink-faint)" font-family="Martian Mono, monospace">${min.toFixed(0)}</text>` : ''}
       <path d="${line}" fill="none" stroke="var(--flag)" stroke-width="${smoothOn ? 1.2 : 2}"
             stroke-linejoin="round" stroke-linecap="round"
             opacity="${smoothOn ? 0.45 : 1}"></path>
@@ -2330,7 +2330,7 @@ function renderHandicapCard(profile, { subtitle, caveat, implied } = {}) {
     <h2>${profile.overall <= 0.5 ? 'You play like scratch' : `You play like a ${fmtHandicap(profile.overall)}`}</h2>
     ${subtitle ? `<p class="muted">${subtitle}</p>` : ''}
     <div class="card-editor">
-      <div class="hdr" style="grid-template-columns:1fr 56px 62px 58px">
+      <div class="hdr" style="grid-template-columns:minmax(0,1fr) 56px 62px 58px">
         <span>Part of the game</span>
         <span style="text-align:center">SG/18</span>
         <span style="text-align:center">Plays like</span>
@@ -2342,7 +2342,7 @@ function renderHandicapCard(profile, { subtitle, caveat, implied } = {}) {
         // The read on strong or weak is relative to the rest of the
         // game either way, so it follows whichever figure is shown.
         const gap = profile.overall - level;
-        return `<div class="line" style="grid-template-columns:1fr 56px 62px 58px">
+        return `<div class="line" style="grid-template-columns:minmax(0,1fr) 56px 62px 58px">
           <span>
             <strong>${CATEGORY_LABELS[row.category]}</strong>
             <span class="tiny">${
@@ -2887,7 +2887,7 @@ function renderStandings(allRounds) {
 
   const body = rows.length ? rows.map((row) => {
     const lead = row.rank === 1;
-    return `<div style="display:grid;gap:0 8px;border-bottom:1px solid var(--cream);${cols};align-items:center;padding:12px 0;${lead ? 'background:var(--flag-wash);margin:0 -18px;padding-left:18px;padding-right:18px;' : ''}${row.qualified ? '' : 'opacity:0.6;'}">
+    return `<div style="display:grid;gap:0 8px;border-bottom:1px solid var(--green-line);${cols};align-items:center;padding:12px 0;${lead ? 'background:var(--flag-wash);margin:0 -8px;padding-left:8px;padding-right:8px;' : ''}${row.qualified ? '' : 'opacity:0.6;'}">
       <span class="display" style="font-size:20px;${lead ? 'color:var(--flag)' : ''}">${row.rank || '&ndash;'}</span>
       <div>
         <div style="font-weight:600">${esc(row.player)}${row.player === STATE.player ? ' <span class="tiny">you</span>' : ''}</div>
@@ -4813,7 +4813,7 @@ function applyTheme() {
     || (choice === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', dark ? '#0e1412' : '#173b2e');
+  if (meta) meta.setAttribute('content', dark ? '#0f1311' : '#f7f4ec');
 }
 
 function init() {

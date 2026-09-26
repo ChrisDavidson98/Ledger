@@ -1,203 +1,240 @@
 /* ---------------------------------------------------------------
-   Ledger — visual system.
-   Cream paper, deep fairway green, flagstick red. Slab headings
-   against a clean sans, mono for every number so figures line up
-   in columns. Tap targets sized for a phone held in one hand.
+   Ledger — visual system. "Yardage book."
+
+   A course planner's notebook: a faint ruled grid, serif headings,
+   every figure in a monospace so columns line up, and ruled rows in
+   place of floating cards. Two colours carry meaning — gain and loss —
+   and everything else stays out of their way.
+
+   All colour, type and spacing lives in the tokens below. The older
+   names (--cream, --paper, --green-mid, --flag …) are kept as aliases
+   because screens reference them inline; new rules use the semantic
+   names.
 --------------------------------------------------------------- */
 
 :root {
-  --cream: #f6f3ea;
-  --paper: #fffefb;
-  --ink: #1e2621;
-  --ink-soft: #5b6660;
-  --ink-faint: #8b9590;
-  --green-deep: #173b2e;
-  --green-mid: #3e6b57;
-  --green-line: #b9c9bc;
-  --flag: #a8391f;
-  --flag-soft: #e7c9bc;
-  --flag-wash: #fbebe6;
-  --radius: 14px;
-  --shadow: 0 1px 2px rgba(23, 59, 46, 0.08), 0 4px 14px rgba(23, 59, 46, 0.06);
-  --tap: 46px;
+  --font-serif: "Instrument Serif", Georgia, serif;
+  --font-mono: "Martian Mono", ui-monospace, monospace;
+  --font-sans: "Public Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --tap: 44px;
+  --tap-primary: 56px;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --gutter: 16px;
+  --grid-size: 18px;
+
+  /* Light: paper and ink. */
+  --bg: #f7f4ec;
+  --grid-line: #ece7da;
+  --surface: #fbf9f3;
+  --header-bg: #f7f4ec;
+  --header-ink: #16150f;
+  --header-rule: #16150f;
+  --header-rule-w: 2px;
+  --nav-bg: #f7f4ec;
+  --text: #16150f;
+  --text-2: #5d5a50;
+  --text-3: #8a8676;
+  --rule-strong: #16150f;
+  --rule-soft: #d9d3c3;
+  --control: #bdb6a3;
+  --gain: #1f5fbf;
+  --loss: #b8431b;
+  --loss-wash: #f6e4dc;
+  --primary-bg: #16150f;
+  --primary-ink: #f7f4ec;
+
+  /* Aliases for the names screens use inline. */
+  --cream: var(--bg);
+  --paper: var(--surface);
+  --ink: var(--text);
+  --ink-soft: var(--text-2);
+  --ink-faint: var(--text-3);
+  --green-deep: var(--text);
+  --green-mid: var(--gain);
+  --green-line: var(--rule-soft);
+  --flag: var(--loss);
+  --flag-soft: var(--loss);
+  --flag-wash: var(--loss-wash);
 }
 
-/* Dark palette. Only the tokens change — every rule below is written
-   against them, so nothing else needs a dark variant. The greens stay
-   green and the flag stays red; they are lifted for contrast against a
-   dark ground rather than swapped for different hues. */
+/* Dark: the default look on most phones. */
 :root[data-theme="dark"] {
-  --cream: #141816;
-  --paper: #1c2220;
-  --ink: #e8eae7;
-  --ink-soft: #a3aeaa;
-  --ink-faint: #78837f;
-  --green-deep: #d3e2d7;
-  --green-mid: #7fc39b;
-  --green-line: #35423c;
-  --flag: #e8785a;
-  --flag-soft: #6b3527;
-  --flag-wash: #2e1c17;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.3);
+  --bg: #141816;
+  --grid-line: #181d1b;
+  --surface: #1c2220;
+  --header-bg: #0f1311;
+  --header-ink: #e8eae7;
+  --header-rule: #e8785a;
+  --header-rule-w: 3px;
+  --nav-bg: #1a1f1d;
+  --text: #e8eae7;
+  --text-2: #a4ada8;
+  --text-3: #79837e;
+  --rule-strong: #3a4540;
+  --rule-soft: #262e2a;
+  --control: #4a5550;
+  --gain: #7fc39b;
+  --loss: #e8785a;
+  --loss-wash: #2b1d18;
+  --primary-bg: #7fc39b;
+  --primary-ink: #10201a;
 }
-
-/* The top bar is the one place the deep green is a background rather
-   than a foreground, so it needs its own treatment once inverted. */
-:root[data-theme="dark"] .topbar {
-  background: #0e1412;
-  color: var(--ink);
-}
-:root[data-theme="dark"] .badge,
-:root[data-theme="dark"] .chip.active,
-:root[data-theme="dark"] .par-toggle button.active {
-  background: var(--green-mid);
-  border-color: var(--green-mid);
-  color: #101512;
-}
-:root[data-theme="dark"] .btn-primary {
-  background: var(--green-mid);
-  color: #101512;
-}
-:root[data-theme="dark"] .miss-cell.active {
-  background: var(--green-mid);
-  border-color: var(--green-mid);
-  color: #101512;
-}
-:root[data-theme="dark"] .ok-box {
-  background: #16241b;
-}
-:root[data-theme="dark"] .fairway-divider {
-  background: repeating-linear-gradient(
-    90deg, var(--green-mid) 0 18px, var(--green-line) 18px 36px
-  );
-}
-:root[data-theme="dark"] .stat-box {
-  background: #232a27;
-}
-:root[data-theme="dark"] .stat-box .val { color: var(--ink); }
 
 * { box-sizing: border-box; }
 
 html, body { margin: 0; padding: 0; }
 
 body {
-  background: var(--cream);
-  color: var(--ink);
-  font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15px;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
-  padding-bottom: 88px;
+  padding-bottom: 96px;
   overscroll-behavior-y: contain;
 }
 
 h1, h2, h3, .display {
-  font-family: "Zilla Slab", Georgia, serif;
-  font-weight: 600;
+  font-family: var(--font-serif);
+  font-weight: 400;
   letter-spacing: -0.01em;
-  color: var(--green-deep);
+  color: var(--text);
   margin: 0;
+  line-height: 1.1;
 }
 
-.mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+.mono { font-family: var(--font-mono); }
+.serif { font-family: var(--font-serif); }
+.callout {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 19px;
+  line-height: 1.35;
+  color: var(--text);
+}
 
-#app { max-width: 540px; margin: 0 auto; padding: 0 16px; }
+/* Small mono label: section headers, column heads, captions. */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+}
+
+#app { max-width: 540px; margin: 0 auto; padding: 0 var(--gutter); }
 
 /* --- Top bar ---------------------------------------------------- */
 
 .topbar {
-  /* The home-screen app draws under the status bar, so the brand and
-     the player name were sitting behind the clock and the battery.
-     Push the bar down by whatever the notch actually needs. */
-  padding: calc(20px + env(safe-area-inset-top, 0px)) 16px 14px;
-  padding-left: max(16px, env(safe-area-inset-left));
-  padding-right: max(16px, env(safe-area-inset-right));
-  background: var(--green-deep);
-  color: var(--cream);
+  /* The home-screen app draws under the status bar; push the bar down
+     by whatever the notch actually needs. */
+  padding: calc(18px + env(safe-area-inset-top, 0px)) var(--gutter) 12px;
+  padding-left: max(var(--gutter), env(safe-area-inset-left));
+  padding-right: max(var(--gutter), env(safe-area-inset-right));
+  margin: 0 calc(-1 * var(--gutter));
+  background: var(--header-bg);
+  color: var(--header-ink);
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 3px solid var(--flag);
+  border-bottom: var(--header-rule-w) solid var(--header-rule);
 }
 .topbar .brand {
-  font-family: "Zilla Slab", serif;
-  font-size: 22px;
-  font-weight: 700;
+  font-family: var(--font-serif);
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.01em;
 }
-.topbar .brand span { color: var(--flag-soft); }
+.topbar .brand span { color: var(--loss); }
 .topbar .sub {
-  font-size: 11px;
-  opacity: 0.75;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-2);
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   text-align: right;
 }
 
-/* --- Cards ------------------------------------------------------ */
+/* --- Sections ----------------------------------------------------
+   What were cards are now ruled sections: a strong rule on top, no
+   fill, no shadow. The grid shows through, which is the point. */
 
 .card {
-  background: var(--paper);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 18px;
-  margin: 14px 0;
-  border: 1px solid rgba(23, 59, 46, 0.06);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--rule-strong);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 16px 0 18px;
+  margin: 0;
 }
-.card h2 { font-size: 19px; margin-bottom: 10px; }
-.card h3 { font-size: 15px; margin-bottom: 8px; }
-.muted { color: var(--ink-soft); font-size: 13px; line-height: 1.55; }
-.tiny { font-size: 12px; color: var(--ink-faint); }
+.topbar + .card,
+.topbar + * + .card:first-of-type { border-top: none; }
+.card h2 { font-size: 28px; margin-bottom: 10px; }
+.card h3 { font-size: 20px; margin-bottom: 8px; }
+.muted { color: var(--text-2); font-size: 14px; line-height: 1.55; }
+.tiny { font-size: 12px; color: var(--text-3); line-height: 1.5; }
 
 .fairway-divider {
-  height: 6px;
-  margin: 4px 0 16px;
-  background: repeating-linear-gradient(
-    90deg, var(--green-mid) 0 18px, var(--green-deep) 18px 36px
-  );
-  border-radius: 3px;
-  opacity: 0.5;
+  height: 1px;
+  margin: 12px 0 14px;
+  background: var(--rule-soft);
 }
 
 /* --- Buttons ---------------------------------------------------- */
 
 button {
-  font-family: inherit;
+  font-family: var(--font-sans);
   cursor: pointer;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius);
   font-size: 15px;
   font-weight: 600;
   transition: transform 0.08s ease, opacity 0.15s ease;
   min-height: var(--tap);
+  color: inherit;
 }
-button:active { transform: scale(0.97); }
+button:active { transform: scale(0.98); }
 
-.btn-primary {
-  background: var(--green-deep);
-  color: var(--cream);
-  padding: 13px 20px;
-  width: 100%;
-}
+.btn-primary,
 .btn-flag {
-  background: var(--flag);
-  color: #fff;
-  padding: 13px 20px;
+  min-height: var(--tap-primary);
+  padding: 0 20px;
   width: 100%;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
-.btn-ghost {
-  background: transparent;
-  color: var(--green-deep);
-  border: 1.5px solid var(--green-line);
-  padding: 11px 16px;
-  width: 100%;
-}
+.btn-primary { background: var(--primary-bg); color: var(--primary-ink); }
+.btn-flag { background: var(--loss); color: #fff; }
+:root[data-theme="dark"] .btn-flag { color: #1a0f0b; }
+
+.btn-ghost,
 .btn-danger {
   background: transparent;
-  color: var(--flag);
-  border: 1.5px solid var(--flag-soft);
-  padding: 11px 16px;
+  border: 1px solid var(--control);
+  padding: 0 16px;
   width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
+.btn-ghost { color: var(--text); }
+.btn-danger { color: var(--loss); border-color: var(--loss); }
 button:disabled { opacity: 0.35; cursor: not-allowed; }
 button:disabled:active { transform: none; }
 
@@ -211,22 +248,23 @@ button:disabled:active { transform: none; }
   align-items: center;
   justify-content: center;
   padding: 10px 6px;
-  border-radius: 9px;
-  border: 1.5px solid var(--green-line);
-  background: var(--paper);
-  color: var(--green-deep);
-  font-size: 13px;
-  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--control);
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
   min-height: var(--tap);
 }
 .chip.active {
-  background: var(--green-deep);
-  color: var(--cream);
-  border-color: var(--green-deep);
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+  border-color: var(--primary-bg);
+  font-weight: 600;
 }
 .chip.flag.active {
-  background: var(--flag);
-  border-color: var(--flag);
+  background: var(--loss);
+  border-color: var(--loss);
   color: #fff;
 }
 .chip-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0; }
@@ -237,40 +275,40 @@ button:disabled:active { transform: none; }
 .miss-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
+  gap: 0;
   margin: 8px 0;
   max-width: 264px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
 }
 .miss-cell {
   aspect-ratio: 1;
-  border-radius: 9px;
-  border: 1.5px solid var(--green-line);
-  background: var(--paper);
-  color: var(--ink-soft);
-  font-size: 11px;
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid var(--control);
+  border-bottom: 1px solid var(--control);
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
   font-weight: 600;
+  text-transform: uppercase;
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 0;
   padding: 2px;
   text-align: center;
-  line-height: 1.15;
+  line-height: 1.2;
 }
-.miss-cell.center {
-  border-color: var(--green-mid);
-  color: var(--green-mid);
-  border-style: dashed;
-}
-.miss-cell.active {
-  background: var(--green-deep);
-  border-color: var(--green-deep);
-  color: var(--cream);
-}
+.miss-cell:nth-child(3n) { border-right: none; }
+.miss-cell:nth-last-child(-n + 3) { border-bottom: none; }
+.miss-cell.center { color: var(--gain); }
+.miss-cell.active,
 .miss-cell.center.active {
-  background: var(--green-mid);
-  border-color: var(--green-mid);
-  border-style: solid;
+  background: var(--primary-bg);
+  color: var(--primary-ink);
 }
 
 /* --- Forms ------------------------------------------------------ */
@@ -278,56 +316,59 @@ button:disabled:active { transform: none; }
 input[type="text"],
 input[type="number"],
 input[type="password"],
-select {
+input[type="date"],
+input[type="time"],
+select,
+textarea {
   width: 100%;
   padding: 12px;
-  border-radius: 9px;
-  border: 1.5px solid var(--green-line);
-  background: var(--paper);
-  font-family: inherit;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--control);
+  background: var(--surface);
+  font-family: var(--font-sans);
   font-size: 16px; /* 16px keeps iOS from zooming the page on focus */
-  color: var(--ink);
+  color: var(--text);
   min-height: var(--tap);
 }
-input:focus, select:focus {
+input:focus, select:focus, textarea:focus {
   outline: none;
-  border-color: var(--green-mid);
+  border-color: var(--gain);
 }
 label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-2);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   display: block;
-  margin: 12px 0 5px;
+  margin: 14px 0 6px;
 }
 
 .big-number-input {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 26px !important;
-  font-weight: 600;
+  font-family: var(--font-serif) !important;
+  font-size: 40px !important;
+  font-weight: 400;
   text-align: center;
-  padding: 14px 12px;
+  padding: 6px 12px;
 }
 
-/* --- Bottom nav ------------------------------------------------- */
+/* --- Bottom nav --------------------------------------------------
+   Icons only; the current tab opens into a pill with its name. */
 
 .navbar {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  background: var(--paper);
-  border-top: 1px solid rgba(23, 59, 46, 0.08);
+  background: var(--nav-bg);
+  border-top: 1px solid var(--rule-strong);
   display: flex;
   justify-content: space-around;
   align-items: center;
   padding: 8px 12px max(10px, env(safe-area-inset-bottom));
   z-index: 10;
 }
-/* Icons only; the current tab opens into a pill with its name, so the
-   bar says where you are without five labels competing for room. */
 .navbtn {
   background: none;
   border: none;
@@ -339,20 +380,20 @@ label {
   height: 46px;
   padding: 0 12px;
   border-radius: 23px;
-  color: var(--ink-faint);
-  font: 600 14px "IBM Plex Sans", sans-serif;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   white-space: nowrap;
   transition: background-color 0.15s, color 0.15s;
 }
 .navbtn svg { flex: none; }
 .navbtn.active {
-  background: var(--green-deep);
-  color: #fff;
+  background: var(--primary-bg);
+  color: var(--primary-ink);
   padding: 0 16px;
-}
-:root[data-theme="dark"] .navbtn.active {
-  background: var(--green-mid);
-  color: #101512;
 }
 
 /* --- Rows ------------------------------------------------------- */
@@ -361,55 +402,76 @@ label {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: var(--tap);
   padding: 12px 0;
   border: none;
-  border-bottom: 1px dashed var(--green-line);
+  border-bottom: 1px solid var(--rule-soft);
   width: 100%;
   background: none;
   text-align: left;
   border-radius: 0;
+  color: var(--text);
 }
 .row:last-child { border-bottom: none; }
 .badge {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
-  background: var(--green-deep);
-  color: var(--cream);
+  background: transparent;
+  border: 1px solid var(--control);
+  color: var(--text);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: "Zilla Slab", serif;
-  font-weight: 700;
-  font-size: 15px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 11px;
   flex-shrink: 0;
 }
 .row-meta { flex: 1; min-width: 0; }
-.row-meta .rname { font-weight: 600; font-size: 14px; color: var(--ink); }
-.row-meta .rsub { font-size: 12px; color: var(--ink-soft); }
-.row-val { font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 14px; }
+.row-meta .rname { font-weight: 600; font-size: 15px; color: var(--text); }
+.row-meta .rsub { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-2); letter-spacing: 0.02em; margin-top: 2px; }
+.row-val { font-family: var(--font-mono); font-weight: 600; font-size: 13px; }
 
-.sg-pos { color: var(--green-mid); }
-.sg-neg { color: var(--flag); }
-.sg-zero { color: var(--ink-soft); }
+.sg-pos { color: var(--gain); }
+.sg-neg { color: var(--loss); }
+.sg-zero { color: var(--text-2); }
 
 /* --- Stats ------------------------------------------------------ */
 
-.stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 8px; }
-.stat-grid.g4 { grid-template-columns: repeat(4, 1fr); }
-.stat-box { background: var(--cream); border-radius: 10px; padding: 12px 8px; text-align: center; }
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--rule-soft);
+  border-left: 1px solid var(--rule-soft);
+}
+.stat-grid.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat-grid.g4 .val { font-size: 14px; }
+.stat-box {
+  background: none;
+  border-right: 1px solid var(--rule-soft);
+  border-bottom: 1px solid var(--rule-soft);
+  border-radius: 0;
+  padding: 12px 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
 .stat-box .val {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--green-deep);
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
 }
 .stat-box .lbl {
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
-  margin-top: 3px;
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+  margin-top: 4px;
 }
 
 .shot-line {
@@ -417,9 +479,10 @@ label {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--cream);
-  font-size: 13px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 .shot-line:last-child { border-bottom: none; }
 .shot-line .desc { flex: 1; min-width: 0; }
@@ -427,35 +490,26 @@ label {
 .progress { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .progress .track {
   flex: 1;
-  height: 4px;
-  background: var(--green-line);
-  border-radius: 2px;
+  height: 2px;
+  background: var(--rule-soft);
   margin: 0 10px;
   overflow: hidden;
 }
-.progress .fill { height: 100%; background: var(--flag); transition: width 0.2s ease; }
+.progress .fill { height: 100%; background: var(--loss); transition: width 0.2s ease; }
 
-.empty { text-align: center; padding: 34px 10px; color: var(--ink-soft); font-size: 14px; }
-.empty .glyph { font-size: 32px; margin-bottom: 8px; }
+.empty { text-align: center; padding: 34px 10px; color: var(--text-2); font-size: 14px; }
+.empty .glyph { font-size: 28px; margin-bottom: 8px; opacity: 0.7; }
 
-.err-box {
-  background: var(--flag-wash);
-  border: 1px solid var(--flag-soft);
-  color: var(--flag);
-  padding: 10px 12px;
-  border-radius: 9px;
-  font-size: 13px;
-  margin: 8px 0;
-}
+.err-box,
 .ok-box {
-  background: #eaf1ec;
-  border: 1px solid var(--green-line);
-  color: var(--green-deep);
   padding: 10px 12px;
-  border-radius: 9px;
-  font-size: 13px;
-  margin: 8px 0;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  margin: 10px 0;
+  background: var(--surface);
 }
+.err-box { border: 1px solid var(--loss); color: var(--loss); }
+.ok-box { border: 1px solid var(--gain); color: var(--text); }
 
 /* --- Scorecard editor ------------------------------------------- */
 
@@ -468,82 +522,82 @@ label {
   padding: 5px 0;
 }
 .card-editor .hdr {
+  font-family: var(--font-mono);
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-faint);
-  border-bottom: 1px solid var(--green-line);
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--rule-strong);
   padding-bottom: 6px;
   margin-bottom: 4px;
 }
-.card-editor .line { border-bottom: 1px solid var(--cream); }
+.card-editor .line { border-bottom: 1px solid var(--rule-soft); }
 .card-editor .hno {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
-  color: var(--ink-soft);
-  font-size: 13px;
+  color: var(--text-2);
+  font-size: 12px;
 }
-.par-toggle { display: flex; gap: 4px; }
+.par-toggle { display: flex; gap: 0; border: 1px solid var(--control); border-radius: var(--radius-sm); overflow: hidden; }
 .par-toggle button {
   flex: 1;
   padding: 7px 0;
-  font-size: 13px;
-  border-radius: 7px;
-  border: 1.5px solid var(--green-line);
-  background: var(--paper);
-  color: var(--ink-soft);
-  min-height: 38px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid var(--control);
+  background: transparent;
+  color: var(--text-2);
+  min-height: 40px;
 }
+.par-toggle button:last-child { border-right: none; }
 .par-toggle button.active {
-  background: var(--green-deep);
-  border-color: var(--green-deep);
-  color: var(--cream);
+  background: var(--primary-bg);
+  color: var(--primary-ink);
 }
 .card-editor input {
   padding: 7px 8px;
   font-size: 15px;
-  min-height: 38px;
+  min-height: 40px;
   text-align: center;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .tee-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-.tee-tabs .chip { padding: 8px 12px; min-height: 40px; font-size: 13px; }
+.tee-tabs .chip { padding: 8px 12px; min-height: var(--tap); font-size: 13px; }
 
 .split { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .stack > * + * { margin-top: 10px; }
 
 /* --- Calendar ----------------------------------------------------
-   A month at a glance, sized so a thumb can hit any day. Markers are
-   never colour alone: a scheduled round is a filled dot, practice is
-   a hollow ring, and a day already played is tinted and ticked. That
-   is three signals that survive both a colourblind reader and a phone
-   in bright sun, which on a golf course is most of them.
------------------------------------------------------------------- */
+   Markers are never colour alone: a scheduled round is a filled dot,
+   practice a hollow ring, a day already played is tinted and ticked. */
 
 .cal-head {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 2px;
   margin-bottom: 4px;
 }
 .cal-head span {
   text-align: center;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  color: var(--text-3);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 .cal-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 2px;
 }
 .cal-day {
   position: relative;
   aspect-ratio: 1 / 1;
-  min-height: 40px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -551,43 +605,22 @@ label {
   gap: 3px;
   padding: 2px 0 4px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: none;
-  color: var(--ink);
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 13px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
   font-weight: 500;
 }
-.cal-day.muted-day { color: var(--ink-faint); opacity: 0.5; }
-.cal-day.today {
-  border-color: var(--flag);
-  font-weight: 700;
-}
-.cal-day.played { background: var(--cream); }
-.cal-day.has-events { border-color: var(--green-line); }
-.cal-day .marks {
-  display: flex;
-  gap: 3px;
-  align-items: center;
-  height: 7px;
-}
-.cal-day .mk {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  display: inline-block;
-}
-.cal-day .mk.round { background: var(--green-mid); }
-.cal-day .mk.practice {
-  background: none;
-  border: 1.5px solid var(--green-mid);
-  opacity: 0.75;
-}
-.cal-day .mk.cancelled {
-  background: none;
-  border: 1.5px solid var(--ink-faint);
-  opacity: 0.6;
-}
+.cal-day.muted-day { color: var(--text-3); opacity: 0.5; }
+.cal-day.today { border-color: var(--loss); font-weight: 700; }
+.cal-day.played { background: var(--surface); }
+.cal-day.has-events { border-color: var(--rule-soft); }
+.cal-day .marks { display: flex; gap: 3px; align-items: center; height: 7px; }
+.cal-day .mk { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.cal-day .mk.round { background: var(--gain); }
+.cal-day .mk.practice { background: none; border: 1.5px solid var(--gain); }
+.cal-day .mk.cancelled { background: none; border: 1.5px solid var(--text-3); opacity: 0.6; }
 .cal-day .mk.done {
   border-radius: 0;
   background: none;
@@ -595,7 +628,7 @@ label {
   height: auto;
   font-size: 9px;
   line-height: 1;
-  color: var(--green-mid);
+  color: var(--gain);
   font-weight: 700;
 }
 .cal-legend {
@@ -603,8 +636,11 @@ label {
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
-  font-size: 11px;
-  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
 }
 .cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .cal-nav {
@@ -616,12 +652,12 @@ label {
 }
 .cal-nav h2 { margin: 0; }
 .cal-nav button {
-  min-width: 40px;
-  min-height: 40px;
-  border-radius: 9px;
-  border: 1.5px solid var(--green-line);
-  background: var(--paper);
-  color: var(--ink);
+  min-width: var(--tap);
+  min-height: var(--tap);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--control);
+  background: transparent;
+  color: var(--text);
   font-size: 17px;
 }
 
@@ -629,9 +665,19 @@ label {
 .link-btn {
   background: none;
   border: none;
-  padding: 10px 4px;
-  font: 600 14px "IBM Plex Sans", sans-serif;
-  color: var(--flag);
+  min-height: var(--tap);
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--loss);
   cursor: pointer;
 }
-.link-btn.muted-link { color: var(--ink-soft); font-weight: 500; font-size: 13px; }
+.link-btn.muted-link { color: var(--text-2); }
+
+/* Figures in narrow table columns: Martian Mono runs wide, so these
+   step down a size rather than push the table past the screen edge. */
+.card-editor .line .mono,
+.card-editor .line span { font-size: 12px; min-width: 0; }
