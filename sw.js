@@ -8,7 +8,7 @@
 --------------------------------------------------------------- */
 
 /* Bumped whenever SHELL changes, so activate clears the old copy. */
-const CACHE = 'ledger-v16';
+const CACHE = 'ledger-v17';
 
 /*
  * Every module app.js imports, because they are static imports: one

@@ -12,7 +12,7 @@ import { CATEGORIES } from './baseline.js';
 import { playerSummary } from './model.js';
 
 /** Enough rounds that one great day does not win a season. */
-export const MIN_ROUNDS = { season: 5, recent: 2 };
+export const MIN_ROUNDS = { season: 3, recent: 2 };
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The rounds a scope covers, as [from, until) timestamps. */
