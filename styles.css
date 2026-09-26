@@ -681,3 +681,19 @@ label {
    step down a size rather than push the table past the screen edge. */
 .card-editor .line .mono,
 .card-editor .line span { font-size: 12px; min-width: 0; }
+
+/* Distance band at the head of a Stats row: approach yards, putt feet. */
+.range-tag {
+  flex: 0 0 64px;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono);
+  line-height: 1.2;
+}
+.range-tag span { font-size: 13px; font-weight: 600; color: var(--text); }
+.range-tag small {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+}

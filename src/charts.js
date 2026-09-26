@@ -162,7 +162,7 @@ export function approachByDistanceChart(buckets, { thinBelow = 5, label = 'tour'
   // and collided with the counts at narrow widths; the card's own text
   // says the same thing with room to say it.
   const padB = 30;
-  const padL = 30;
+  const padL = 36; // room for "+0.7" in the wide mono face
   const padR = 6;
 
   const values = buckets.map((b) => b.sg / b.shots);

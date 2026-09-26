@@ -183,7 +183,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26f';
+const BUILD = '2026-09-26g';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -2279,6 +2279,15 @@ function renderTeeCard(tee) {
   </div>`;
 }
 
+/**
+ * A distance band as a left-hand label column ("100–150" over "YDS").
+ * Ranges are too wide for a round badge in a monospace face.
+ */
+function rangeTag(label, unit) {
+  const range = String(label).replace(/ft/g, '').replace('-', '–');
+  return `<div class="range-tag"><span>${esc(range)}</span><small>${unit}</small></div>`;
+}
+
 function renderPuttingCard(putts) {
   if (!putts.length) return '';
   return `<div class="card">
@@ -2286,7 +2295,7 @@ function renderPuttingCard(putts) {
     <p class="muted">Make rate and strokes gained by distance.</p>
     ${putts.map((b) => `
       <div class="row" style="${thinStyle(b.putts)}">
-        <div class="badge" style="font-size:11px">${esc(b.label)}</div>
+        ${rangeTag(b.label, 'ft')}
         <div class="row-meta">
           <div class="rname">${b.putts} putt${b.putts === 1 ? '' : 's'} &middot; ${Math.round((b.holed / b.putts) * 100)}% holed${thinMark(b.putts)}</div>
           <div class="rsub">${b.threePutts ? `${b.threePutts} three-putt${b.threePutts === 1 ? '' : 's'} from here` : 'no three-putts from here'}</div>
@@ -2544,7 +2553,7 @@ function renderApproachCard(buckets) {
     ${approachByDistanceChart(buckets, { thinBelow: THIN_SAMPLE, label: benchName() })}
     ${buckets.map((b) => `
       <div class="row" style="${thinStyle(b.shots)}">
-        <div class="badge" style="font-size:11px">${esc(b.label)}</div>
+        ${rangeTag(b.label, 'yds')}
         <div class="row-meta">
           <div class="rname">${b.shots} shot${b.shots === 1 ? '' : 's'}${thinMark(b.shots)}</div>
           <div class="rsub">${b.proximityCount
