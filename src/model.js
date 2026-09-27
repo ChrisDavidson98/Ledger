@@ -158,13 +158,13 @@ export function clubDistances(rounds, baseline = 'tour') {
 
 /**
  * Stock distances for someone with nothing logged yet — a 7-iron at
- * 150 and roughly ten yards a club either side. Long irons are left
- * out: most bags no longer carry them, and a suggestion nobody owns
- * is worse than none. Your own logged number replaces any of these as
- * soon as it exists, and a logged 2i or 3i joins the list the same way.
+ * 150 and roughly ten yards a club either side. Driver is left out:
+ * nobody wants it suggested for an approach off a stock number. Your
+ * own logged number replaces any of these as soon as it exists.
  */
 export const GENERIC_CLUB_YARDS = {
-  '3W': 215, '5W': 200, 'Hyb': 185, '4i': 170, '5i': 165, '6i': 160,
+  '3W': 215, '5W': 200, '7W': 190, '2H': 205, '3H': 195, '4H': 185, '5H': 175,
+  'Hyb': 185, '2i': 195, '3i': 185, '4i': 170, '5i': 165, '6i': 160,
   '7i': 150, '8i': 140, '9i': 130, 'PW': 120, 'GW': 105, 'SW': 90, 'LW': 75,
 };
 
@@ -172,14 +172,14 @@ export const GENERIC_CLUB_YARDS = {
 const OWN_CLUB_MIN_SHOTS = 3;
 
 /**
- * The club whose typical distance is nearest the yardage.
+ * The club in the bag whose typical distance is nearest the yardage.
  *
  * Pass the output of clubDistances so the player's own numbers win
  * wherever there are enough of them. Nothing beyond the longest club
  * or inside the shortest is refused — the answer is just the end of
  * the bag, which is what you would be hitting anyway.
  */
-export function suggestClub(yards, clubs = []) {
+export function suggestClub(yards, clubs = [], bag = CLUBS) {
   if (!(yards > 0)) return null;
   const table = { ...GENERIC_CLUB_YARDS };
   clubs.forEach((c) => {
@@ -187,17 +187,27 @@ export function suggestClub(yards, clubs = []) {
   });
   let best = null;
   Object.entries(table).forEach(([club, carry]) => {
+    if (!bag.includes(club)) return;
     const off = Math.abs(carry - yards);
     if (!best || off < best.off) best = { club, off };
   });
-  return best.club;
+  return best ? best.club : null;
 }
 
-/** One club longer (step -1) or shorter (step +1) through the bag. */
-export function stepClub(club, step) {
-  const i = CLUBS.indexOf(club);
-  if (i < 0) return club;
-  return CLUBS[Math.max(0, Math.min(CLUBS.length - 1, i + step))];
+/**
+ * One club shorter (step +1) or longer (step -1) through the bag. A
+ * club not in the bag — an old round, a borrowed club — steps to the
+ * nearest bag club in that direction.
+ */
+export function stepClub(club, step, bag = CLUBS) {
+  const ordered = CLUBS.filter((c) => bag.includes(c));
+  if (!ordered.length) return club;
+  const at = CLUBS.indexOf(club);
+  if (at < 0) return ordered[0];
+  const next = step > 0
+    ? ordered.find((c) => CLUBS.indexOf(c) > at)
+    : [...ordered].reverse().find((c) => CLUBS.indexOf(c) < at);
+  return next || club;
 }
 
 /**

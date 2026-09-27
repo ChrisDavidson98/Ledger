@@ -8,6 +8,8 @@
    pushing, so wiring it up won't touch any calling code.
 --------------------------------------------------------------- */
 
+import { CLUBS, DEFAULT_BAG } from './baseline.js';
+
 const PREFIX = 'ledger:';
 const KEYS = {
   player: PREFIX + 'player',
@@ -195,6 +197,26 @@ export function setPref(key, value) {
  *  rangefinder gives an exact number, and typing it is fine. */
 export function trackClubs() {
   return getPrefs().clubs === true;
+}
+
+/**
+ * The clubs a player carries. Kept per player rather than per phone:
+ * rounds get logged on whichever phone is to hand, and Manny's 2-hybrid
+ * should not turn up in anybody else's picker.
+ */
+export function getBag(player) {
+  const bags = getPrefs().bags || {};
+  const bag = bags[player];
+  return Array.isArray(bag) && bag.length ? bag : DEFAULT_BAG.slice();
+}
+
+export function toggleBagClub(player, club) {
+  const bags = getPrefs().bags || {};
+  const bag = getBag(player);
+  const next = bag.includes(club) ? bag.filter((c) => c !== club) : [...bag, club];
+  if (!next.length) return;
+  bags[player] = CLUBS.filter((c) => next.includes(c));
+  setPref('bags', bags);
 }
 
 export function usePresets() {

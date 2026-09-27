@@ -463,6 +463,15 @@ check('your own number beats the stock one once there are three shots', () => {
 check('clubbing down from driver goes to the 3-wood', () =>
   eq(M.stepClub('Dr', 1), '3W', 'club down') || eq(M.stepClub('Dr', -1), 'Dr', 'past driver'));
 
+check('stepping skips clubs that are not in the bag', () => {
+  const bag = ['Dr', '3W', '2i', '4i', '5i'];
+  return eq(M.stepClub('3W', 1, bag), '2i', 'down from 3W')
+    || eq(M.stepClub('4i', -1, bag), '2i', 'up from 4i');
+});
+
+check('only clubs in the bag are suggested', () =>
+  eq(M.suggestClub(195, [], ['Dr', '3W', '2H', '5i', '7i']), '2H', '195 without a 3H'));
+
 check('stepping a club stops at the ends of the bag', () =>
   eq(M.stepClub('LW', 1), 'LW', 'past the lob wedge') || eq(M.stepClub('7i', -1), '6i', 'club up'));
 

@@ -659,7 +659,10 @@ function screenPlay() {
   // approach, so it gets the club for the yardage like any other.
   if (showForm && !editing && store.trackClubs() && (category === 'app' || category === 'ott')
       && draft.club === undefined && start.unit === 'y') {
-    draft.club = category === 'ott' ? 'Dr' : suggestClub(Number(start.dist), myClubDistances());
+    const bag = store.getBag(STATE.player);
+    draft.club = category === 'ott'
+      ? (bag.includes('Dr') ? 'Dr' : bag[0])
+      : suggestClub(Number(start.dist), myClubDistances(), bag);
     draft.clubSuggested = !!draft.club;
   }
   // Score through finished holes only: a hole in progress would read
@@ -899,11 +902,11 @@ function renderShotForm(hole, start, category, shotNum) {
     <div class="field-row">
       ${clubs ? `
         <div class="field field-club${draft.clubSuggested ? ' is-suggested' : ''}">
-          <button class="club-step" data-action="club-step" data-step="-1" aria-label="Club up">&minus;</button>
+          <button class="club-step" data-action="club-step" data-step="1" aria-label="Shorter club">&minus;</button>
           <button class="club-name" data-action="open-sheet" data-sheet="club" aria-label="Club: ${esc(draft.club || 'none')}. Tap for all clubs.">
             <span class="eyebrow">${draft.clubSuggested ? 'Club?' : 'Club'}</span><strong>${esc(draft.club || '—')}</strong>
           </button>
-          <button class="club-step" data-action="club-step" data-step="1" aria-label="Club down">+</button>
+          <button class="club-step" data-action="club-step" data-step="-1" aria-label="Longer club">+</button>
         </div>` : ''}
       ${misses && !store.missInline() ? `
         <button class="field" data-action="open-sheet" data-sheet="miss">
@@ -935,7 +938,7 @@ function renderSheet(category) {
   const draft = STATE.draft;
   const body = STATE.sheet === 'club'
     ? `<div class="chip-grid" style="grid-template-columns:repeat(5,1fr);gap:6px">
-        ${CLUBS.map((club) => `
+        ${CLUBS.filter((c) => store.getBag(STATE.player).includes(c) || c === draft.club).map((club) => `
           <button class="chip ${draft.club === club ? 'active' : ''}" data-club="${club}"
                   style="padding:8px 0;font-size:13px">${club}</button>`).join('')}
       </div>`
@@ -1189,6 +1192,7 @@ function screenHistory() {
 }
 
 function screenSettings() {
+  const bag = store.getBag(STATE.player);
   const config = sync.getConfig();
   const pending = store.unsynced().length;
 
@@ -1217,7 +1221,15 @@ function screenSettings() {
         <button class="chip ${store.trackClubs() ? '' : 'active'}" data-clubs="off">Off</button>
         <button class="chip ${store.trackClubs() ? 'active' : ''}" data-clubs="on">Track</button>
       </div>
-      <p class="tiny">Tee shots and approaches arrive with a club already picked Adds one optional tap on approach shots only &mdash; not tee shots, chips or putts. Enough to learn what each iron really goes without tripling the taps for answers you already know.mdash; driver off the tee on a par 4 or 5, the club for the yardage everywhere else. Use Adds one optional tap on approach shots only &mdash; not tee shots, chips or putts. Enough to learn what each iron really goes without tripling the taps for answers you already know.minus; and + to change it; logging the shot records it. Chips and putts are left alone.</p>
+      <p class="tiny">Tee shots and approaches arrive with a club already picked &mdash; driver off the tee on a par 4 or 5, the club for the yardage everywhere else. &minus; drops to a shorter club, + goes longer; logging the shot records it. Chips and putts are left alone.</p>
+      ${store.trackClubs() ? `
+        <label>Your bag</label>
+        <div class="chip-grid" style="grid-template-columns:repeat(5,1fr);gap:6px">
+          ${CLUBS.map((club) => `
+            <button class="chip ${bag.includes(club) ? 'active' : ''}" data-bag-club="${club}"
+                    style="padding:8px 0;font-size:13px">${club}</button>`).join('')}
+        </div>
+        <p class="tiny">Only these show up when picking or stepping through clubs, and only these are suggested. Saved per player, so a borrowed phone keeps its owner's bag.</p>` : ''}
 
       <label>Miss direction</label>
       <div class="chip-grid g2">
@@ -5001,7 +5013,9 @@ const ACTIONS = {
   'h2h-pick': (el) => { STATE.h2hOpponent = el.getAttribute('data-player'); render(); },
   'club-step': (el) => {
     const d = STATE.draft;
-    d.club = d.club ? stepClub(d.club, Number(el.getAttribute('data-step'))) : '7i';
+    const bag = store.getBag(STATE.player);
+    d.club = d.club ? stepClub(d.club, Number(el.getAttribute('data-step')), bag)
+      : (bag.includes('7i') ? '7i' : bag[0]);
     d.clubSuggested = false;
     render();
   },
@@ -5306,7 +5320,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-dist-step],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-miss-inline],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window],[data-repair-course]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-dist-step],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-bag-club],[data-miss-inline],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window],[data-repair-course]');
   if (!target) return;
 
   const benchmark = target.getAttribute('data-benchmark');
@@ -5467,6 +5481,12 @@ function onClick(event) {
 
   const theme = target.getAttribute('data-set-theme');
   if (theme) { store.setPref('theme', theme); applyTheme(); return render(); }
+
+  const bagClub = target.getAttribute('data-bag-club');
+  if (bagClub) {
+    store.toggleBagClub(STATE.player, bagClub);
+    return render();
+  }
 
   const clubsPref = target.getAttribute('data-clubs');
   if (clubsPref) { store.setPref('clubs', clubsPref === 'on'); return render(); }

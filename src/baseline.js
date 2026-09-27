@@ -155,17 +155,22 @@ export const MISS_LABELS = {
 };
 
 /**
- * Clubs offered on approach shots, longest first.
+ * Every club the app knows, longest first. Each player picks their
+ * own bag from these in Settings; this is the full shelf, not a bag.
  *
- * Approach only, and optional. Logging a club on every tee shot, chip
- * and putt would roughly triple the taps for an answer nobody needs —
- * you know what you hit off the tee. The question worth answering is
- * how far each iron actually goes, and that lives on approaches.
+ * Logged on tee shots and approaches, never chips or putts — that would
+ * triple the taps for answers nobody needs. 'Hyb' is the old unnumbered
+ * hybrid, kept so clubs logged before numbered hybrids still read.
  */
 export const CLUBS = [
-  'Dr', '3W', '5W', 'Hyb', '2i', '3i',
-  '4i', '5i', '6i', '7i', '8i',
+  'Dr', '3W', '5W', '7W', '2H', '3H', '4H', '5H', 'Hyb',
+  '2i', '3i', '4i', '5i', '6i', '7i', '8i',
   '9i', 'PW', 'GW', 'SW', 'LW',
+];
+
+/** A typical bag, until a player picks their own. */
+export const DEFAULT_BAG = [
+  'Dr', '3W', '5W', '4H', '5i', '6i', '7i', '8i', '9i', 'PW', 'GW', 'SW', 'LW',
 ];
 
 /** True when a shot is one worth asking miss direction for. */
