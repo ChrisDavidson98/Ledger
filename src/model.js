@@ -499,6 +499,7 @@ export function approachBuckets(rounds, baseline = 'tour') {
     proximitySum: 0,
     proximityCount: 0,
     misses: {},
+    detail: [],
   }));
 
   rounds.forEach((round) => {
@@ -511,6 +512,7 @@ export function approachBuckets(rounds, baseline = 'tour') {
         if (!bucket) return;
         bucket.shots += 1;
         bucket.sg += sg;
+        bucket.detail.push({ round, hole, shot, sg });
         // Proximity only means something when the ball finished on the green.
         if (shot.holed) {
           bucket.proximitySum += 0;
@@ -559,6 +561,7 @@ export function puttingBuckets(rounds, baseline = 'tour') {
     sg: 0,
     firstPutts: 0,
     threePutts: 0,
+    detail: [],
   }));
 
   const find = (feet) => buckets.find((b) => feet >= b.lo && feet < b.hi);
@@ -572,6 +575,7 @@ export function puttingBuckets(rounds, baseline = 'tour') {
         const { sg } = shotSG(shot, hole.par, baseline);
         bucket.putts += 1;
         bucket.sg += sg;
+        bucket.detail.push({ round, hole, shot, sg });
         if (shot.holed) bucket.holed += 1;
         if (index === 0) {
           bucket.firstPutts += 1;
@@ -594,11 +598,12 @@ export function teeOutcomes(rounds, baseline = 'tour') {
   let total = 0;
   let sgTotal = 0;
 
-  eachShot(rounds, baseline, (shot, hole, category, sg) => {
+  eachShot(rounds, baseline, (shot, hole, category, sg, round) => {
     if (category !== 'ott') return;
     const lie = shot.holed ? 'green' : shot.endLie;
-    if (!outcomes[lie]) outcomes[lie] = { lie, count: 0, sg: 0 };
+    if (!outcomes[lie]) outcomes[lie] = { lie, count: 0, sg: 0, detail: [] };
     outcomes[lie].count += 1;
+    outcomes[lie].detail.push({ round, hole, shot, sg });
     outcomes[lie].sg += sg;
     total += 1;
     sgTotal += sg;

@@ -2627,16 +2627,15 @@ function renderTeeCard(tee) {
   if (!tee.total) return '';
   return `<div class="card">
     <h2>Off the tee</h2>
-    <p class="muted">Where tee shots on par 4s and 5s finished, and what each outcome cost.</p>
-    ${tee.rows.map((row) => `
-      <div class="row" style="${thinStyle(row.count)}">
+    <p class="muted">Where tee shots on par 4s and 5s finished, and what each outcome cost. Tap a row to see the shots.</p>
+    ${tee.rows.map((row) => drillRow(`tee:${row.lie}`, `
         <div class="badge" style="font-size:12px">${Math.round((row.count / tee.total) * 100)}%</div>
         <div class="row-meta">
           <div class="rname">${LIE_LABELS[row.lie] || esc(row.lie)}${thinMark(row.count)}</div>
           <div class="rsub">${row.count} of ${tee.total} tee shots</div>
         </div>
-        <div class="row-val ${sgClass(row.sg / row.count)}">${fmtSG(row.sg / row.count)}</div>
-      </div>`).join('')}
+        <div class="row-val ${sgClass(row.sg / row.count)}">${fmtSG(row.sg / row.count)}</div>`,
+      thinStyle(row.count), row.detail, shotPath)).join('')}
     <p class="tiny" style="margin-top:8px">Per-shot average. A miss that costs little is not the miss to fix.</p>
   </div>`;
 }
@@ -2654,16 +2653,16 @@ function renderPuttingCard(putts) {
   if (!putts.length) return '';
   return `<div class="card">
     <h2>Putting</h2>
-    <p class="muted">Make rate and strokes gained by distance.</p>
-    ${putts.map((b) => `
-      <div class="row" style="${thinStyle(b.putts)}">
+    <p class="muted">Make rate and strokes gained by distance. Tap a row to see the putts.</p>
+    ${putts.map((b) => drillRow(`putt:${b.label}`, `
         ${rangeTag(b.label, 'ft')}
         <div class="row-meta">
           <div class="rname">${b.putts} putt${b.putts === 1 ? '' : 's'} &middot; ${Math.round((b.holed / b.putts) * 100)}% holed${thinMark(b.putts)}</div>
           <div class="rsub">${b.threePutts ? `${b.threePutts} three-putt${b.threePutts === 1 ? '' : 's'} from here` : 'no three-putts from here'}</div>
         </div>
-        <div class="row-val ${sgClass(b.sg / b.putts)}">${fmtSG(b.sg / b.putts)}</div>
-      </div>`).join('')}
+        <div class="row-val ${sgClass(b.sg / b.putts)}">${fmtSG(b.sg / b.putts)}</div>`,
+      thinStyle(b.putts), b.detail,
+      (s) => `${fmtDist(s.startDist, s.startUnit)} &rarr; ${s.holed ? '<strong>holed</strong>' : `missed, ${fmtDist(s.endDist, s.endUnit)} left`}`)).join('')}
   </div>`;
 }
 
@@ -2901,20 +2900,58 @@ function thinStyle(count) {
   return count < THIN_SAMPLE ? 'opacity:0.55' : '';
 }
 
+/** Most shots listed under an opened row before the rest are summarised. */
+const DRILL_LIMIT = 25;
+
+/**
+ * A stats row that opens in place to list the shots behind it — the
+ * same drop-down as a hole in Hole by hole, so the numbers can be
+ * checked against what actually happened rather than taken on trust.
+ *
+ * `inner` is the row's usual contents; `line` describes one shot. When
+ * the shots come from more than one round, each is labelled with its
+ * date and course, since "hole 7" alone would be ambiguous.
+ */
+function drillRow(key, inner, style, detail, line) {
+  const open = STATE.openDrill === key;
+  const multi = new Set(detail.map((d) => d.round.id)).size > 1;
+  const shown = detail.slice()
+    .sort((a, b) => (new Date(b.round.date) - new Date(a.round.date)) || (a.hole.hole - b.hole.hole) || (a.shot.n - b.shot.n))
+    .slice(0, DRILL_LIMIT);
+  return `<button class="row drill-row${open ? ' is-open' : ''}" data-action="toggle-drill" data-key="${esc(key)}"
+      aria-expanded="${open}" style="${style}">${inner}</button>
+    ${open ? `<div class="drill-list">
+      ${shown.map((d) => `
+        <div class="shot-line" style="padding:5px 0">
+          <span class="desc tiny">${multi ? `${esc(fmtDate(d.round.date))} &middot; ${esc(d.round.courseName)} &middot; ` : ''}Hole ${d.hole.hole}${
+            d.shot.club ? ` &middot; ${esc(d.shot.club)}` : ''} &middot; ${line(d.shot)}</span>
+          <span class="mono ${sgClass(d.sg)}" style="font-size:12px">${fmtSG(d.sg)}</span>
+        </div>`).join('')}
+      ${detail.length > shown.length ? `<p class="tiny" style="margin:4px 0 0">And ${detail.length - shown.length} older.</p>` : ''}
+    </div>` : ''}`;
+}
+
+/** Where a shot started and finished, in words. */
+function shotPath(shot) {
+  const to = shot.holed ? 'holed' : `${LIE_LABELS[shot.endLie]} ${fmtDist(shot.endDist, shot.endUnit)}`;
+  const miss = shot.miss && shot.miss !== 'target' ? ` &middot; ${esc(MISS_LABELS[shot.miss])}` : '';
+  const pen = shot.penalty ? ` &middot; +${shot.penalty} pen` : '';
+  return `${LIE_LABELS[shot.startLie]} ${fmtDist(shot.startDist, shot.startUnit)} &rarr; ${esc(to)}${miss}${pen}`;
+}
+
 function renderApproachCard(buckets) {
   if (!buckets.length) return '';
   const thin = buckets.filter((b) => b.shots < THIN_SAMPLE).length;
   return `<div class="card">
     <h2>Approach play</h2>
-    <p class="muted">Strokes gained and average proximity by distance. Approach starts at 30 yards &mdash; anything closer counts as short game.</p>
+    <p class="muted">Strokes gained and average proximity by distance. Approach starts at 30 yards &mdash; anything closer counts as short game. Tap a row to see the shots.</p>
     ${/*
        The chart says which yardage is bleeding shots; the rows below
        carry the proximity and the counts, which a chart cannot hold
        without becoming three charts.
     */''}
     ${approachByDistanceChart(buckets, { thinBelow: THIN_SAMPLE, label: benchName() })}
-    ${buckets.map((b) => `
-      <div class="row" style="${thinStyle(b.shots)}">
+    ${buckets.map((b) => drillRow(`app:${b.label}`, `
         ${rangeTag(b.label, 'yds')}
         <div class="row-meta">
           <div class="rname">${b.shots} shot${b.shots === 1 ? '' : 's'}${thinMark(b.shots)}</div>
@@ -2922,8 +2959,8 @@ function renderApproachCard(buckets) {
             ? 'Avg ' + Math.round(b.proximitySum / b.proximityCount) + 'ft when on'
             : 'never finished on the green'}</div>
         </div>
-        <div class="row-val ${sgClass(b.sg / b.shots)}">${fmtSG(b.sg / b.shots)}</div>
-      </div>`).join('')}
+        <div class="row-val ${sgClass(b.sg / b.shots)}">${fmtSG(b.sg / b.shots)}</div>`,
+      thinStyle(b.shots), b.detail, shotPath)).join('')}
     <p class="tiny" style="margin-top:8px">Bars and figures are the per-shot average, with the number of shots under each band. The bucket costing most per swing is where practice pays${
       thin ? `, but ${thin === 1 ? 'the faded row has' : 'faded rows have'} under ${THIN_SAMPLE} shots &mdash; not enough to trust yet` : ''
     }.</p>
@@ -5056,6 +5093,11 @@ const ACTIONS = {
   'end-round': () => {
     if (!confirm('End the round here and save it?')) return;
     finishRound();
+  },
+  'toggle-drill': (el) => {
+    const key = el.getAttribute('data-key');
+    STATE.openDrill = STATE.openDrill === key ? null : key;
+    render();
   },
   'amend-round': (el) => beginAmend(el.getAttribute('data-id')),
   'review-hole': (el) => beginAmend(el.getAttribute('data-id'), Number(el.getAttribute('data-hole'))),
