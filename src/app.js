@@ -184,7 +184,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26n';
+const BUILD = '2026-09-26o';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -312,7 +312,7 @@ const NAV_GROUPS = {
   calendar: ['calendar', 'teeTime', 'teeTimeEdit'],
   history: ['history', 'detail', 'settings', 'repair'],
   stats: ['stats'],
-  clubhouse: ['clubhouse'],
+  clubhouse: ['clubhouse', 'player'],
 };
 
 /** Course screens belong to whichever tab opened them. */
@@ -1790,7 +1790,7 @@ function handicapWords(value) {
  * are nudged apart, and every label (the parts and "YOU") takes the
  * lowest row above the line where it does not touch another.
  */
-function renderBookScale(profile) {
+function renderBookScale(profile, marker = 'YOU') {
   const W = 340;
   const x0 = 8;
   const x1 = W - 8;
@@ -1808,7 +1808,7 @@ function renderBookScale(profile) {
 
   const you = at(profile.overall);
   const labels = [
-    { text: `YOU ${Math.round(profile.overall)}`, x: you + 4, colour: 'var(--text)', weight: 600 },
+    { text: `${marker} ${Math.round(profile.overall)}`, x: you + 4, colour: 'var(--text)', weight: 600 },
     ...dots.map((d) => ({ text: CATEGORY_SHORT_BOOK[d.category], x: d.x - 5, colour: d.good ? 'var(--gain)' : 'var(--loss)', weight: 500 })),
   ];
   const rows = [];
@@ -1844,23 +1844,32 @@ function renderBookScale(profile) {
 
 const CATEGORY_SHORT_BOOK = { ott: 'Tee', app: 'Approach', arg: 'Short', putt: 'Putting' };
 
-function renderBook() {
-  const game = gameProfile(playerRounds());
+/**
+ * The book on a player — you on Home, anyone from the Club tab. Only
+ * your own book offers to book a session for the leak.
+ */
+function renderBook(player = STATE.player) {
+  const self = player === STATE.player;
+  const theirs = store.getRounds().filter((r) => r.player === player);
+  const who = self ? 'you' : player;
+  const game = gameProfile(theirs);
   if (!game) {
-    const have = sgRounds(playerRounds()).length;
+    const have = sgRounds(theirs).length;
     return `<div class="card">
-      <div class="eyebrow">The book on you</div>
+      <div class="eyebrow">The book on ${esc(who)}</div>
       <h2 style="font-size:34px;margin:6px 0 8px">Still writing it.</h2>
-      <p class="muted">Log ${3 - have} more round${3 - have === 1 ? '' : 's'} shot by shot and this fills in: the handicap each part of your game plays like, and where the strokes are going.</p>
+      <p class="muted">${self
+        ? `Log ${3 - have} more round${3 - have === 1 ? '' : 's'} shot by shot and this fills in: the handicap each part of your game plays like, and where the strokes are going.`
+        : `${esc(player)} needs ${3 - have} more round${3 - have === 1 ? '' : 's'} with shots logged before there is a book to read.`}</p>
     </div>`;
   }
 
   const { profile, per18, rounds } = game;
-  const focus = practiceFocus(playerRounds());
+  const focus = practiceFocus(theirs);
   const rows = profile.rows.slice().sort((a, b) => b.handicap - a.handicap);
 
   let booking = '';
-  if (focus) {
+  if (focus && self) {
     const booked = bookedFocus(
       visibleTeeTimes(store.getLiveTeeTimes(), STATE.player), focus.plan.practiceType, todayKey()
     );
@@ -1884,9 +1893,9 @@ function renderBook() {
   }
 
   return `<div class="card">
-    <div class="eyebrow">The book on you &middot; ${rounds} rounds &middot; vs tour</div>
+    <div class="eyebrow">The book on ${esc(who)} &middot; ${rounds} rounds &middot; vs tour</div>
     <h2 style="font-size:38px;margin:6px 0 2px">Plays like <em class="${profile.overall <= 18 ? 'sg-pos' : ''}" style="font-style:italic">${esc(handicapWords(profile.overall))}.</em></h2>
-    ${renderBookScale(profile)}
+    ${renderBookScale(profile, self ? 'YOU' : String(player).toUpperCase())}
     <div style="border-top:1px solid var(--rule-strong);margin-top:6px">
       ${rows.map((row) => {
         const good = row.handicap <= profile.overall + 0.5;
@@ -1898,9 +1907,13 @@ function renderBook() {
       }).join('')}
     </div>
     ${focus ? `
-      <p class="callout" style="margin:14px 0 6px">${esc(CATEGORY_LABELS[focus.category])} is the leak. Bring it to your own level and save about ${focus.strokesPer18.toFixed(1)} a round.</p>
+      <p class="callout" style="margin:14px 0 6px">${esc(CATEGORY_LABELS[focus.category])} is the leak. ${self
+        ? `Bring it to your own level and save about ${focus.strokesPer18.toFixed(1)} a round.`
+        : `Brought up to the rest of ${esc(player)}&rsquo;s game, it would save about ${focus.strokesPer18.toFixed(1)} a round.`}</p>
       ${booking}` : `
-      <p class="callout" style="margin:14px 0 0">No part of your game is dragging the rest. Keep doing what you are doing.</p>`}
+      <p class="callout" style="margin:14px 0 0">${self
+        ? 'No part of your game is dragging the rest. Keep doing what you are doing.'
+        : `No part of ${esc(player)}&rsquo;s game is dragging the rest.`}</p>`}
   </div>`;
 }
 
@@ -3163,6 +3176,73 @@ function screenClubhouse() {
 }
 
 /**
+ * One player, opened by tapping their name on the Club tab: their
+ * book, their recent rounds and their bests. Nothing here that the
+ * Rounds and Club tabs do not already show — it gathers it in one place.
+ */
+function screenPlayer() {
+  const player = STATE.viewPlayer;
+  const all = store.getRounds();
+  const theirs = all.filter((r) => r.player === player);
+  if (!player || !theirs.length) return screenClubhouse();
+
+  const players = [...new Set(all.map((r) => r.player))].filter(Boolean);
+  const marker = playerMarkers(players).get(player);
+  const self = player === STATE.player;
+  const summary = playerSummary(player, all, 'tour');
+  const plays = summary.sg ? handicapForTotal(summary.sg.total) : null;
+  const bests = summary.bests;
+  const bestRows = [
+    ['Best round', bests.bestRound ? `${fmtToPar(bests.bestRound.toPar)} &middot; ${esc(bests.bestRound.course || '')}` : null],
+    ['Longest drive', bests.longestDrive ? `${bests.longestDrive.yards}y` : null],
+    ['Closest approach', bests.closestApproach ? `${Math.round(bests.closestApproach.feet)}ft` : null],
+    ['Longest putt', bests.longestPutt ? `${Math.round(bests.longestPutt.feet)}ft` : null],
+  ].filter(([, v]) => v);
+
+  return `<header class="topbar">
+      <div class="brand">${esc(player)}</div>
+      <div class="sub">${theirs.length} round${theirs.length === 1 ? '' : 's'}${plays == null ? '' : ` &middot; plays like ${esc(fmtHandicapShort(plays))}`}</div>
+    </header>
+    ${notices()}
+    <div style="display:flex;align-items:center;gap:12px;margin:14px 0 4px">
+      ${marker ? markerHtml(marker, 'style="width:44px;height:44px;font-size:16px"') : ''}
+      <button class="link-btn muted-link" data-action="goto-club" style="margin-left:auto">&larr; Club</button>
+    </div>
+
+    ${renderBook(player)}
+
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:4px">Recent rounds</div>
+      ${theirs.slice(0, 5).map((r) => {
+        const sg = isScoreOnly(r) ? null : roundTotals(r, bench()).total;
+        return `<button class="row" data-action="view-round" data-id="${esc(r.id)}">
+          <div class="row-meta">
+            <div class="rname" style="font-weight:500">${esc(r.courseName)} <span style="color:var(--text-2)">&middot; ${esc(r.teeName)}</span></div>
+            <div class="rsub">${fmtDate(r.date)} &middot; ${playedHoles(r).length} holes</div>
+          </div>
+          <span class="mono" style="font-size:12px;font-weight:600">${fmtToPar(roundToPar(r))}</span>
+          ${sg == null ? '' : `<span class="mono ${sgClass(sg)}" style="font-size:12px;font-weight:600;width:52px;text-align:right">${fmtSG(sg)}</span>`}
+        </button>`;
+      }).join('')}
+    </div>
+
+    ${bestRows.length ? `
+      <div class="card">
+        <div class="eyebrow" style="margin-bottom:4px">Career bests</div>
+        ${bestRows.map(([label, value]) => `
+          <div class="row" style="min-height:40px;padding:9px 0">
+            <div class="row-meta"><div class="rname" style="font-weight:500">${label}</div></div>
+            <span class="mono" style="font-size:12px;font-weight:600">${value}</span>
+          </div>`).join('')}
+      </div>` : ''}
+
+    ${self ? '' : `
+      <div class="card" style="border-top:none;padding-top:4px">
+        <button class="btn-primary" data-action="h2h-with" data-player="${esc(player)}">Head to head with ${esc(player)} &rarr;</button>
+      </div>`}`;
+}
+
+/**
  * The season table, ranked on strokes gained per 18 against tour and
  * shown as the handicap that plays like — the same order either way.
  */
@@ -3192,7 +3272,8 @@ function renderStandings(allRounds, markers) {
       row.toParPer18 == null ? null : `${fmtToPar(Math.round(row.toParPer18))}/18`,
       best == null ? null : `BEST ${fmtToPar(best)}`,
     ].filter(Boolean).join(' &middot; ');
-    return `<div class="stand-row${row.qualified ? '' : ' is-short'}">
+    return `<button class="stand-row${row.qualified ? '' : ' is-short'}" data-action="view-player" data-player="${esc(row.player)}"
+        aria-label="${esc(row.player)}: open their page">
       <span class="stand-rank">${row.rank || '&ndash;'}</span>
       ${markerHtml(markers.get(row.player) || { initial: '?', style: 'outline' })}
       <div class="stand-name">
@@ -3203,7 +3284,7 @@ function renderStandings(allRounds, markers) {
         <div class="eyebrow" style="font-size:9px">Plays like</div>
         <div class="stand-num ${row.rank === 1 ? 'sg-pos' : ''}">${plays == null ? '&ndash;' : esc(fmtHandicapShort(plays))}</div>
       </div>
-    </div>`;
+    </button>`;
   }).join('') : `<p class="muted" style="margin-top:12px">No rounds ${scope === 'season' ? `in ${year}` : 'in the last 30 days'} yet.</p>`;
 
   return `<div class="card" style="border-top:none;padding-top:8px">
@@ -3662,6 +3743,7 @@ const SCREENS = {
   teeTimeEdit: screenTeeTimeEdit,
   stats: screenStats,
   clubhouse: screenClubhouse,
+  player: screenPlayer,
   courses: screenCourses,
   courseImport: screenCourseImport,
   courseEdit: screenCourseEdit,
@@ -4743,6 +4825,9 @@ const ACTIONS = {
     if (STATE.screen === 'settings') render();
   },
 
+  'view-player': (el) => go('player', { viewPlayer: el.getAttribute('data-player') }),
+  'goto-club': () => go('clubhouse'),
+  'h2h-with': (el) => go('clubhouse', { clubView: 'h2h', h2hOpponent: el.getAttribute('data-player') }),
   'club-view': (el) => { STATE.clubView = el.getAttribute('data-view'); render(); },
   'wpw-mode': (el) => { STATE.wpwMode = el.getAttribute('data-mode'); render(); },
   'h2h-pick': (el) => { STATE.h2hOpponent = el.getAttribute('data-player'); render(); },

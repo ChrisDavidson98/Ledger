@@ -1078,3 +1078,16 @@ button, a, input, .lie-cell, .miss-cell { touch-action: manipulation; }
 .avatar-opt .pmark { width: 38px; height: 38px; font-size: 14px; }
 .avatar-opt.active { border: 2px solid var(--text); }
 .pmark svg { display: block; }
+
+/* Standings rows open the player's page. */
+button.stand-row {
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--rule-soft);
+  border-radius: 0;
+  text-align: left;
+  color: var(--text);
+  font-weight: 400;
+  min-height: var(--tap);
+}
