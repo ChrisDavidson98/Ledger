@@ -62,7 +62,8 @@ var SHEETS = {
    * too, but it loses the record of who they were, and their rounds
    * are still on the sheet regardless.
    */
-  players: ['player', 'active', 'created_at', 'updated_at'],
+  // avatar: an icon key the player chose, blank for their initial.
+  players: ['player', 'active', 'created_at', 'updated_at', 'avatar'],
   // A score-only round has no shots, so it writes one row per hole
   // with shot_num 0 carrying just the score. Without that its
   // hole-by-hole detail existed nowhere but the phone that entered it.
@@ -100,7 +101,7 @@ SHEETS.shots_archive = SHEETS.shots.slice();
  * "that phone is pointed at an older deployment" is otherwise
  * invisible from the client.
  */
-var CONTRACT = 8;
+var CONTRACT = 9;
 
 /*
  * The oldest client this deployment will accept WRITES from.
@@ -676,6 +677,7 @@ function pullPlayers() {
         active: isActive(row.active),
         created_at: row.created_at ? String(row.created_at) : '',
         updated_at: row.updated_at ? String(row.updated_at) : '',
+        avatar: row.avatar ? String(row.avatar).trim() : '',
       };
     });
   return { ok: true, players: rows, serverTime: new Date().toISOString() };
@@ -723,6 +725,12 @@ function pushPlayers(players) {
       active: entry.active === false ? 'FALSE' : 'TRUE',
       created_at: was.created_at ? String(was.created_at) : now,
       updated_at: now,
+      // Only the player's own phone sends an avatar. Every other write
+      // (the roster being published, somebody deactivated) leaves out
+      // the field and must keep whatever was chosen.
+      avatar: entry.avatar !== undefined
+        ? String(entry.avatar || '')
+        : (was.avatar ? String(was.avatar) : ''),
     };
   }).filter(function (row) { return row.player !== ''; });
 

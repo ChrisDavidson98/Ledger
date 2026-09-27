@@ -8,7 +8,7 @@
 --------------------------------------------------------------- */
 
 /* Bumped whenever SHELL changes, so activate clears the old copy. */
-const CACHE = 'ledger-v17';
+const CACHE = 'ledger-v18';
 
 /*
  * Every module app.js imports, because they are static imports: one
@@ -40,6 +40,7 @@ const SHELL = [
   './src/recap.js',
   './src/practice.js',
   './src/standings.js',
+  './src/avatars.js',
 ];
 self.addEventListener('install', (event) => {
   event.waitUntil(

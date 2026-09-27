@@ -41,6 +41,7 @@ import * as CH from './src/charts.js';
 import * as RC from './src/recap.js';
 import * as PR from './src/practice.js';
 import * as STD from './src/standings.js';
+import * as AV from './src/avatars.js';
 // Only the PURE helpers are called from here. Importing the module is
 // safe — it has no side effects at load — but nothing below may read
 // or write localStorage, or opening this page would edit real data.
@@ -1058,6 +1059,12 @@ check('standings rank qualified players on strokes gained and leave the rest unr
   if (chris.qualified || chris.rank) return 'one round qualified';
   const recent = STD.standings(rounds, { scope: 'recent', now });
   return recent.rows.find((r) => r.player === 'Chris').qualified ? 'one round qualified the 30-day table' : null;
+});
+
+check('a blank or unknown avatar means the initial; a known one draws an icon', () => {
+  if (AV.isAvatar('') || AV.isAvatar('nonsense') || AV.isAvatar('constructor')) return 'accepted a non-avatar';
+  if (!AV.isAvatar('flag') || !AV.avatarSvg('flag').startsWith('<svg')) return 'flag did not draw';
+  return AV.avatarSvg('nonsense') === '' ? null : 'drew an unknown avatar';
 });
 
 check('a deleted tee time is visible to nobody', () => {

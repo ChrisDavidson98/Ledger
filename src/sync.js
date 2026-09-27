@@ -32,7 +32,7 @@ const LAST_PULL_KEY = 'ledger:last_pull';
  * changes, and raise MIN_CLIENT in Code.gs when an older shape stops
  * being safe to accept.
  */
-export const CLIENT_CONTRACT = 8;
+export const CLIENT_CONTRACT = 9;
 
 /* --- Config ------------------------------------------------------ */
 
@@ -597,8 +597,23 @@ export async function pullPlayers() {
       active: row.active !== false,
       createdAt: row.created_at ? String(row.created_at) : '',
       updatedAt: row.updated_at ? String(row.updated_at) : '',
+      avatar: row.avatar ? String(row.avatar) : '',
     }))
     .filter((p) => p.player);
+}
+
+/**
+ * Publish this player's chosen marker. Only their own row, and only
+ * the avatar changes — the script keeps everything else as it was.
+ * Resolves to whether the sheet actually kept it: a script deployed
+ * before avatars existed accepts the write and drops the field.
+ */
+export async function pushAvatar(player, avatar) {
+  await post('pushPlayers', { players: [{ player, active: true, avatar: avatar || '' }] });
+  const players = await pullPlayers();
+  const me = players.find((p) => p.player.toLowerCase() === String(player).toLowerCase());
+  store.setPlayers(players, 'network');
+  return !!me && (me.avatar || '') === (avatar || '');
 }
 
 export async function pushPlayers(players) {

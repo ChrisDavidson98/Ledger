@@ -99,6 +99,7 @@ import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js'
 import { recapData, drawRecap, shareRecap } from './recap.js';
 import { practiceFocus, bookedFocus, gameProfile } from './practice.js';
 import { standings } from './standings.js';
+import { AVATARS, isAvatar, avatarSvg } from './avatars.js';
 import { planRepair, describePlan } from './repair.js';
 import {
   handicapProfile, fmtHandicap, fmtHandicapShort, upsideFor,
@@ -183,7 +184,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26m';
+const BUILD = '2026-09-26n';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -1172,6 +1173,7 @@ function screenSettings() {
         <div class="row-val">&rsaquo;</div>
       </button>
     </div>
+    ${renderAvatarPicker()}
     <div class="card">
       <h2>Google Sheet backend</h2>
       <p class="muted">Paste the Web App URL from your Apps Script deployment and the shared secret you set on it. Setup steps are in <span class="mono">apps-script/README.md</span>.</p>
@@ -1372,7 +1374,7 @@ function renderRosterCard() {
     ${shared.map((p) => {
       const on = p.active !== false;
       return `<div class="row">
-        <div class="badge" style="font-size:13px${on ? '' : ';opacity:0.4'}">${esc(String(p.player).slice(0, 2).toUpperCase())}</div>
+        <div class="badge" style="font-size:13px${on ? '' : ';opacity:0.4'}">${avatarOf(p.player) ? avatarSvg(avatarOf(p.player), 18) : esc(String(p.player).slice(0, 2).toUpperCase())}</div>
         <div class="row-meta" style="${on ? '' : 'opacity:0.55'}">
           <div class="rname">${esc(p.player)}${p.player === STATE.player ? ' <span class="tiny">you</span>' : ''}</div>
           <div class="rsub">${on ? 'Can sign in' : 'Inactive — cannot sign in'}</div>
@@ -3082,12 +3084,54 @@ function playerMarkers(players) {
     initials.set(p, tag);
   });
   const map = new Map();
-  order.forEach((p, i) => map.set(p, { initial: initials.get(p), style: styles[i % styles.length] }));
+  order.forEach((p, i) => map.set(p, {
+    initial: initials.get(p),
+    avatar: avatarOf(p),
+    style: styles[i % styles.length],
+  }));
   return map;
 }
 
+/** Settings: pick the icon on your marker, or keep your initial. */
+function renderAvatarPicker() {
+  if (!STATE.player) return '';
+  const current = avatarOf(STATE.player);
+  const initial = String(STATE.player).charAt(0).toUpperCase();
+  const option = (key, inner, label) => `
+    <button class="avatar-opt ${current === key ? 'active' : ''}" data-action="set-avatar" data-avatar="${key}"
+            aria-label="${esc(label)}" aria-pressed="${current === key}">
+      <span class="pmark pm-me">${inner}</span>
+    </button>`;
+  return `<div class="card">
+    <h2>Your marker</h2>
+    <p class="muted">How you show up in the Clubhouse. Everyone else sees it once your phone syncs.</p>
+    <div class="avatar-grid">
+      ${option('', esc(initial), 'Your initial')}
+      ${Object.entries(AVATARS).map(([key, a]) => option(key, avatarSvg(key, 22), a.label)).join('')}
+    </div>
+  </div>`;
+}
+
+/**
+ * The icon a player chose, or '' for their initial — which is the
+ * default and what everyone has until they pick something. Your own
+ * choice is read from this phone first, so it shows straight away
+ * even before (or without) the sheet having it.
+ */
+function avatarOf(player) {
+  const name = String(player || '').toLowerCase();
+  if (name === String(STATE.player || '').toLowerCase()) {
+    const mine = store.getPrefs().avatar;
+    if (mine !== undefined) return isAvatar(mine) ? mine : '';
+  }
+  const row = store.getPlayers().find((p) => String(p.player).toLowerCase() === name);
+  return row && isAvatar(row.avatar) ? row.avatar : '';
+}
+
 function markerHtml(marker, extra = '') {
-  return `<span class="pmark pm-${marker.style}" ${extra}>${esc(marker.initial)}</span>`;
+  return `<span class="pmark pm-${marker.style}" ${extra}>${
+    marker.avatar ? avatarSvg(marker.avatar, 17) : esc(marker.initial)
+  }</span>`;
 }
 
 function screenClubhouse() {
@@ -4680,6 +4724,25 @@ const ACTIONS = {
   },
 
   'save-shot': () => { STATE.sheet = null; saveShot(); },
+  // Saved on this phone at once so it shows straight away, then sent to
+  // the sheet for everyone else. An older sheet script quietly drops
+  // the field, and the note says so rather than pretending it worked.
+  'set-avatar': async (el) => {
+    const avatar = el.getAttribute('data-avatar') || '';
+    store.setPref('avatar', avatar);
+    render();
+    if (!sync.isConfigured()) return;
+    try {
+      const kept = await sync.pushAvatar(STATE.player, avatar);
+      STATE.notice = kept
+        ? 'Marker saved. Everyone sees it on their next sync.'
+        : 'Saved on this phone. The others will see it once the sheet script is updated and redeployed.';
+    } catch (err) {
+      STATE.notice = 'Saved on this phone. It will reach the others when you are back online.';
+    }
+    if (STATE.screen === 'settings') render();
+  },
+
   'club-view': (el) => { STATE.clubView = el.getAttribute('data-view'); render(); },
   'wpw-mode': (el) => { STATE.wpwMode = el.getAttribute('data-mode'); render(); },
   'h2h-pick': (el) => { STATE.h2hOpponent = el.getAttribute('data-player'); render(); },
