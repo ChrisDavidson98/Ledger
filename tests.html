@@ -1079,6 +1079,16 @@ check('short-game stats count chips, leaves and up-and-downs', () => {
   return null;
 });
 
+check('an emoji marker takes exactly one emoji and nothing else', () => {
+  if (AV.emojiAvatar('🐦') !== 'emoji:🐦') return 'plain emoji refused';
+  if (!AV.emojiAvatar('👍🏽')) return 'skin-tone emoji refused';
+  if (AV.emojiAvatar('🐦🐦')) return 'two emoji accepted';
+  if (AV.emojiAvatar('K')) return 'a letter accepted';
+  if (AV.emojiAvatar('<b>🐦</b>')) return 'markup accepted';
+  if (!AV.isAvatar('emoji:🐦') || AV.isAvatar('emoji:hi')) return 'isAvatar wrong on emoji';
+  return AV.avatarSvg('emoji:🐦').includes('🐦') ? null : 'emoji did not draw';
+});
+
 check('a deleted tee time is visible to nobody', () => {
   const tt = SCH.newTeeTime({ owner: 'Chris', invitees: [], date: '2026-05-01' });
   tt.deletedAt = new Date().toISOString();

@@ -100,7 +100,7 @@ import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js'
 import { recapData, drawRecap, shareRecap } from './recap.js';
 import { practiceFocus, bookedFocus, gameProfile } from './practice.js';
 import { standings } from './standings.js';
-import { AVATARS, isAvatar, avatarSvg } from './avatars.js';
+import { AVATARS, isAvatar, avatarSvg, emojiOf, emojiAvatar } from './avatars.js';
 import { planRepair, describePlan } from './repair.js';
 import {
   handicapProfile, fmtHandicap, fmtHandicapShort, upsideFor,
@@ -185,7 +185,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26s';
+const BUILD = '2026-09-26t';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -3133,6 +3133,26 @@ function playerMarkers(players) {
   return map;
 }
 
+/**
+ * Saved on this phone at once so it shows straight away, then sent to
+ * the sheet for everyone else. An older sheet script quietly drops the
+ * field, and the note says so rather than pretending it worked.
+ */
+async function saveAvatar(avatar) {
+  store.setPref('avatar', avatar);
+  render();
+  if (!sync.isConfigured()) return;
+  try {
+    const kept = await sync.pushAvatar(STATE.player, avatar);
+    STATE.notice = kept
+      ? 'Marker saved. Everyone sees it on their next sync.'
+      : 'Saved on this phone. The others will see it once the sheet script is updated and redeployed.';
+  } catch (err) {
+    STATE.notice = 'Saved on this phone. It will reach the others when you are back online.';
+  }
+  if (STATE.screen === 'settings') render();
+}
+
 /** Settings: pick the icon on your marker, or keep your initial. */
 function renderAvatarPicker() {
   if (!STATE.player) return '';
@@ -3149,7 +3169,22 @@ function renderAvatarPicker() {
     <div class="avatar-grid">
       ${option('', esc(initial), 'Your initial')}
       ${Object.entries(AVATARS).map(([key, a]) => option(key, avatarSvg(key, 22), a.label)).join('')}
+      <button class="avatar-opt ${emojiOf(current) ? 'active' : ''}" data-action="emoji-entry"
+              aria-label="Use an emoji" aria-pressed="${!!emojiOf(current)}">
+        <span class="pmark pm-me">${emojiOf(current) ? avatarSvg(current, 22) : '<span class="emoji-plus">&#9786;</span>'}</span>
+      </button>
     </div>
+    ${STATE.emojiEntry ? `
+      <div class="emoji-entry">
+        <label for="emojiInput">One emoji</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="emojiInput" inputmode="text" autocomplete="off" autocorrect="off"
+                 placeholder="🐦" value="${esc(emojiOf(current) || '')}" style="font-size:24px;text-align:center">
+          <button class="btn-primary" data-action="save-emoji" style="width:auto;min-height:var(--tap)">Use</button>
+        </div>
+        <p class="tiny">Switch to the emoji keyboard and pick one. Each phone draws emoji its own way, so it may look a little different on everyone else&rsquo;s.</p>
+        ${STATE.emojiError ? `<div class="err-box">${esc(STATE.emojiError)}</div>` : ''}
+      </div>` : ''}
   </div>`;
 }
 
@@ -4834,23 +4869,29 @@ const ACTIONS = {
   },
 
   'save-shot': () => { STATE.sheet = null; saveShot(); },
-  // Saved on this phone at once so it shows straight away, then sent to
-  // the sheet for everyone else. An older sheet script quietly drops
-  // the field, and the note says so rather than pretending it worked.
-  'set-avatar': async (el) => {
-    const avatar = el.getAttribute('data-avatar') || '';
-    store.setPref('avatar', avatar);
+  'set-avatar': (el) => {
+    STATE.emojiEntry = false;
+    return saveAvatar(el.getAttribute('data-avatar') || '');
+  },
+
+  'emoji-entry': () => {
+    STATE.emojiEntry = !STATE.emojiEntry;
+    STATE.emojiError = null;
     render();
-    if (!sync.isConfigured()) return;
-    try {
-      const kept = await sync.pushAvatar(STATE.player, avatar);
-      STATE.notice = kept
-        ? 'Marker saved. Everyone sees it on their next sync.'
-        : 'Saved on this phone. The others will see it once the sheet script is updated and redeployed.';
-    } catch (err) {
-      STATE.notice = 'Saved on this phone. It will reach the others when you are back online.';
+    const input = document.getElementById('emojiInput');
+    if (input) input.focus();
+  },
+
+  'save-emoji': () => {
+    const input = document.getElementById('emojiInput');
+    const avatar = emojiAvatar(input ? input.value : '');
+    if (!avatar) {
+      STATE.emojiError = 'That needs to be a single emoji — letters and words will not work.';
+      return render();
     }
-    if (STATE.screen === 'settings') render();
+    STATE.emojiEntry = false;
+    STATE.emojiError = null;
+    return saveAvatar(avatar);
   },
 
   'view-player': (el) => go('player', { viewPlayer: el.getAttribute('data-player') }),

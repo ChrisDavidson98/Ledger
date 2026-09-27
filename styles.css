@@ -1134,3 +1134,8 @@ button.stand-row {
   padding-left: 12px;
   margin: 4px 0 0 2px;
 }
+
+/* Emoji markers and their entry. */
+.pm-emoji { line-height: 1; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+.emoji-plus { font-size: 20px; line-height: 1; }
+.emoji-entry { margin-top: 12px; }
