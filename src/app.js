@@ -185,7 +185,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26r';
+const BUILD = '2026-09-26s';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -1226,7 +1226,15 @@ function screenSettings() {
       ` : ''}
     </div>
 
-    <div class="eyebrow" style="margin:26px 0 6px;padding-top:14px;border-top:3px double var(--rule-strong)">Group &amp; sheet setup</div>
+    <button class="admin-toggle" data-action="toggle-admin" aria-expanded="${STATE.adminOpen ? 'true' : 'false'}">
+      <span>
+        <span class="admin-tag">Admin only</span>
+        <span class="admin-title">Sheet &amp; group setup</span>
+        <span class="admin-note">For whoever runs the Google Sheet. Nothing in here is needed to play.</span>
+      </span>
+      <span class="admin-chev" aria-hidden="true">${STATE.adminOpen ? '&minus;' : '+'}</span>
+    </button>
+    ${STATE.adminOpen ? `<div class="admin-body">
     <div class="card">
       <button class="row" style="border:none;padding:0" data-action="open-courses">
         <div class="row-meta">
@@ -1325,6 +1333,8 @@ function screenSettings() {
       ${STATE.syncStatus ? `<div class="${STATE.syncStatus.bad ? 'err-box' : 'ok-box'}">${esc(STATE.syncStatus.text)}</div>` : ''}
     </div>
 
+    </div>` : ''}
+
     <button class="btn-ghost" data-action="goto-history">&larr; Back</button>`;
 }
 
@@ -1349,7 +1359,7 @@ function renderRosterCard() {
     return `<div class="card">
       <h2>Who can sign in</h2>
       <p class="muted">No sheet is connected, so this device keeps its own list: ${esc(store.getRoster().join(', '))}.</p>
-      <p class="tiny">Connect a sheet above and the roster becomes shared &mdash; a name added on any phone works on all of them.</p>
+      <p class="tiny">Connect a sheet below and the roster becomes shared &mdash; a name added on any phone works on all of them.</p>
     </div>`;
   }
 
@@ -1395,7 +1405,7 @@ function renderRosterCard() {
     ${origin ? `<p class="tiny">Last read from the ${esc(origin.source)} ${
       origin.source === 'network' ? '' : '(this phone could not reach the sheet last time) '
     }&middot; ${origin.count} name${origin.count === 1 ? '' : 's'}.</p>` : ''}
-    <p class="tiny">Turning somebody off blocks them at the gate and leaves every round they logged exactly where it is. This is identity, not a lock &mdash; what keeps strangers out of the data is the sheet secret above.</p>
+    <p class="tiny">Turning somebody off blocks them at the gate and leaves every round they logged exactly where it is. This is identity, not a lock &mdash; what keeps strangers out of the data is the sheet secret below.</p>
   </div>`;
 }
 
@@ -4846,6 +4856,7 @@ const ACTIONS = {
   'view-player': (el) => go('player', { viewPlayer: el.getAttribute('data-player') }),
   'goto-club': () => go('clubhouse'),
   'h2h-with': (el) => go('clubhouse', { clubView: 'h2h', h2hOpponent: el.getAttribute('data-player') }),
+  'toggle-admin': () => { STATE.adminOpen = !STATE.adminOpen; render(); },
   'stats-tab': (el) => {
     STATE.statsTab = el.getAttribute('data-tab');
     if (STATE.screen === 'stats') { render(); window.scrollTo(0, 0); } else go('stats');

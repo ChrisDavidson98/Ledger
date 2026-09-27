@@ -1096,3 +1096,41 @@ button.stand-row {
 
 .stats-tabs > button { font-size: 9.5px; letter-spacing: 0.04em; padding: 0 2px; }
 .part-num { font-family: var(--font-serif); font-size: 64px; line-height: 1; }
+
+/* --- Settings: the admin fold ---------------------------------------- */
+
+.admin-toggle {
+  width: 100%;
+  margin-top: 28px;
+  padding: 16px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px dashed var(--loss);
+  border-radius: var(--radius);
+}
+.admin-toggle > span:first-child { display: flex; flex-direction: column; gap: 3px; }
+.admin-tag {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--loss);
+  border: 1px solid var(--loss);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.admin-title { font-family: var(--font-serif); font-size: 24px; font-weight: 400; }
+.admin-note { font-size: 13px; font-weight: 400; color: var(--text-2); }
+.admin-chev { font-family: var(--font-mono); font-size: 22px; color: var(--loss); }
+.admin-body {
+  border-left: 2px dashed var(--loss);
+  padding-left: 12px;
+  margin: 4px 0 0 2px;
+}
