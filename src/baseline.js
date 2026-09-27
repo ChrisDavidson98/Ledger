@@ -163,7 +163,7 @@ export const MISS_LABELS = {
  * how far each iron actually goes, and that lives on approaches.
  */
 export const CLUBS = [
-  '3W', '5W', 'Hyb', '2i', '3i',
+  'Dr', '3W', '5W', 'Hyb', '2i', '3i',
   '4i', '5i', '6i', '7i', '8i',
   '9i', 'PW', 'GW', 'SW', 'LW',
 ];

@@ -655,9 +655,11 @@ function screenPlay() {
   // distance, so logging the shot is enough to record it. `undefined`
   // means untouched; a club cleared on purpose is null and stays so.
   const draft = STATE.draft;
-  if (showForm && !editing && store.trackClubs() && category === 'app'
+  // Off the tee of a par 4 or 5 that is driver; a par 3 tee shot is an
+  // approach, so it gets the club for the yardage like any other.
+  if (showForm && !editing && store.trackClubs() && (category === 'app' || category === 'ott')
       && draft.club === undefined && start.unit === 'y') {
-    draft.club = suggestClub(Number(start.dist), myClubDistances());
+    draft.club = category === 'ott' ? 'Dr' : suggestClub(Number(start.dist), myClubDistances());
     draft.clubSuggested = !!draft.club;
   }
   // Score through finished holes only: a hole in progress would read
@@ -855,7 +857,7 @@ function renderShotForm(hole, start, category, shotNum) {
   const unit = endLie && endLie !== 'holed' ? unitForLie(endLie) : null;
   const needsDist = endLie && endLie !== 'holed';
   const ready = endLie && (!needsDist || isValidDist(draft.endDist));
-  const clubs = store.trackClubs() && category === 'app';
+  const clubs = store.trackClubs() && (category === 'app' || category === 'ott');
   const misses = tracksMiss(category);
   const penalty = Number(draft.penalty || 0);
 
@@ -1210,12 +1212,12 @@ function screenSettings() {
       </div>
       <p class="tiny">Buttons add common yardages and putt lengths under the keypad, for when you are pacing off a sprinkler head rather than reading a rangefinder. The keypad stays either way.</p>
 
-      <label>Club on approaches</label>
+      <label>Clubs</label>
       <div class="chip-grid g2">
         <button class="chip ${store.trackClubs() ? '' : 'active'}" data-clubs="off">Off</button>
         <button class="chip ${store.trackClubs() ? 'active' : ''}" data-clubs="on">Track</button>
       </div>
-      <p class="tiny">Adds one optional tap on approach shots only &mdash; not tee shots, chips or putts. Enough to learn what each iron really goes without tripling the taps for answers you already know.</p>
+      <p class="tiny">Tee shots and approaches arrive with a club already picked Adds one optional tap on approach shots only &mdash; not tee shots, chips or putts. Enough to learn what each iron really goes without tripling the taps for answers you already know.mdash; driver off the tee on a par 4 or 5, the club for the yardage everywhere else. Use Adds one optional tap on approach shots only &mdash; not tee shots, chips or putts. Enough to learn what each iron really goes without tripling the taps for answers you already know.minus; and + to change it; logging the shot records it. Chips and putts are left alone.</p>
 
       <label>Miss direction</label>
       <div class="chip-grid g2">

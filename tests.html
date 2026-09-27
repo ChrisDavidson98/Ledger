@@ -460,6 +460,9 @@ check('your own number beats the stock one once there are three shots', () => {
   return eq(M.suggestClub(150, mine), '8i', 'suggested club');
 });
 
+check('clubbing down from driver goes to the 3-wood', () =>
+  eq(M.stepClub('Dr', 1), '3W', 'club down') || eq(M.stepClub('Dr', -1), 'Dr', 'past driver'));
+
 check('stepping a club stops at the ends of the bag', () =>
   eq(M.stepClub('LW', 1), 'LW', 'past the lob wedge') || eq(M.stepClub('7i', -1), '6i', 'club up'));
 
