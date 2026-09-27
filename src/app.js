@@ -185,7 +185,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26p';
+const BUILD = '2026-09-26q';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -2276,7 +2276,9 @@ function renderPartHead(part, ctx) {
 
 function renderStatsPart(part, ctx) {
   const { rounds } = ctx;
-  const headline = renderPartHead(part, ctx);
+  // The same trend card as Overview, in the same place, drawing only
+  // this part — so switching tabs reads as zooming in.
+  const headline = renderPartHead(part, ctx) + renderTrendCard(trendSeries(ctx.allRounds, bench()), part);
 
   if (part === 'ott') {
     return `${headline}
@@ -2329,7 +2331,7 @@ function renderStatsOverview(ctx) {
         <h2 style="font-size:40px;margin:4px 0 0">Plays like <em class="${game.profile.overall <= 18 ? 'sg-pos' : ''}" style="font-style:italic">${esc(handicapWords(game.profile.overall))}.</em></h2>
       </div>` : ''}
 
-    ${renderTrendCard(trendSeries(allRounds, bench()))}
+    ${renderTrendCard(trendSeries(allRounds, bench()), null, { choices: ['total', 'toPar'] })}
 
     ${parts.length ? `
       <div class="card">
@@ -2401,20 +2403,24 @@ function renderStatsOverview(ctx) {
  * is one line and a zero rule, it inherits the theme through CSS
  * variables, and it keeps the app dependency-free and offline.
  */
-function renderTrendCard(allSeries, forcedKey) {
-  const key = forcedKey || STATE.trendKey || 'total';
+function renderTrendCard(allSeries, forcedKey, { choices = ['toPar', 'total', ...CATEGORIES] } = {}) {
+  const key = forcedKey || (choices.includes(STATE.trendKey) ? STATE.trendKey : (choices.includes('total') ? 'total' : choices[0]));
+  // Overview offers the whole-game views; a part's own tab draws only
+  // that part, so moving between them reads as zooming in, not leaving.
+  const switches = forcedKey ? [] : choices.map((k) => [k, k === 'toPar' ? 'Score' : k === 'total' ? 'Total SG' : CATEGORY_SHORT[k]]);
+  const title = CATEGORIES.includes(forcedKey) ? `Trend &middot; ${CATEGORY_LABELS[forcedKey]}` : 'Trend';
   // Score is the one measure a score-only round can contribute to.
   const series = key === 'toPar' ? allSeries : allSeries.filter((p) => !p.scoreOnly);
   const excluded = allSeries.length - series.length;
 
   if (series.length < 2) {
     return series.length === 1 || allSeries.length ? `<div class="card">
-      <h2>Trend</h2>
+      <h2>${title}</h2>
       <p class="muted">${series.length === 1
         ? 'One round in. A second will start the line.'
         : 'No rounds with shot data yet — switch to Score to include score-only rounds.'}</p>
-      ${allSeries.length > 1 ? `<div class="chip-grid" style="grid-template-columns:repeat(6,1fr);gap:6px">
-        ${[['toPar', 'Score'], ['total', 'Total'], ...CATEGORIES.map((c) => [c, CATEGORY_SHORT[c]])].map(([k, label]) => `
+      ${allSeries.length > 1 && switches.length > 1 ? `<div class="chip-grid" style="grid-template-columns:repeat(${switches.length},1fr);gap:6px">
+        ${switches.map(([k, label]) => `
           <button class="chip ${key === k ? 'active' : ''}" data-trend="${k}"
                   style="padding:7px 0;font-size:11px;min-height:36px">${label}</button>`).join('')}
       </div>` : ''}
@@ -2464,15 +2470,15 @@ function renderTrendCard(allSeries, forcedKey) {
 
   return `<div class="card">
     <div class="split">
-      <h2>Trend</h2>
+      <h2>${title}</h2>
       <span class="tiny">${series.length} rounds</span>
     </div>
-    <div class="chip-grid" style="grid-template-columns:repeat(6,1fr);gap:6px">
-      ${[['toPar', 'Score'], ['total', 'Total'], ...CATEGORIES.map((c) => [c, CATEGORY_SHORT[c]])].map(([k, label]) => `
+    ${switches.length > 1 ? `<div class="chip-grid" style="grid-template-columns:repeat(${switches.length},1fr);gap:6px">
+      ${switches.map(([k, label]) => `
         <button class="chip ${key === k ? 'active' : ''}" data-trend="${k}"
                 style="padding:7px 0;font-size:11px;min-height:36px">${label}</button>
       `).join('')}
-    </div>
+    </div>` : ''}
 
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;margin-top:6px"
          role="img" aria-label="Strokes gained per 18 holes by round">
