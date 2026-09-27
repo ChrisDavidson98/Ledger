@@ -1067,6 +1067,18 @@ check('a blank or unknown avatar means the initial; a known one draws an icon', 
   return AV.avatarSvg('nonsense') === '' ? null : 'drew an unknown avatar';
 });
 
+check('short-game stats count chips, leaves and up-and-downs', () => {
+  // Par 4: drive, approach misses to 20y rough, chip to 4ft, one putt: an up-and-down in par.
+  const r = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'fairway', 150), shot('fairway', 150, 'rough', 20),
+    shot('rough', 20, 'green', 4), shot('green', 4, null, null, { holed: true })] }]);
+  const s = M.shortGameStats([r]);
+  if (s.shots !== 1) return `${s.shots} short-game shots`;
+  if (Math.round(s.leaveFt) !== 4) return `leave ${s.leaveFt}`;
+  if (s.upDown.chances !== 1 || s.upDown.made !== 1) return 'up-and-down not counted';
+  return null;
+});
+
 check('a deleted tee time is visible to nobody', () => {
   const tt = SCH.newTeeTime({ owner: 'Chris', invitees: [], date: '2026-05-01' });
   tt.deletedAt = new Date().toISOString();

@@ -1091,3 +1091,8 @@ button.stand-row {
   font-weight: 400;
   min-height: var(--tap);
 }
+
+/* --- Stats tabs ------------------------------------------------------ */
+
+.stats-tabs > button { font-size: 9.5px; letter-spacing: 0.04em; padding: 0 2px; }
+.part-num { font-family: var(--font-serif); font-size: 64px; line-height: 1; }

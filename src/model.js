@@ -516,6 +516,56 @@ export function greensInRegulation(rounds) {
 }
 
 /**
+ * The short game on its own: chips, pitches and bunker shots inside
+ * 30 yards. `upDown` is the scrambling rate — of the holes where the
+ * green was missed in regulation, how many still finished in par or
+ * better. `leaveFt` is the average first putt left by a short-game
+ * shot that finished on the green.
+ */
+export function shortGameStats(rounds, baseline = 'tour') {
+  let shots = 0;
+  let sgTotal = 0;
+  let onGreen = 0;
+  let leaveTotal = 0;
+  let holed = 0;
+  let chances = 0;
+  let made = 0;
+
+  rounds.forEach((round) => {
+    playedHoles(round).forEach((hole) => {
+      if (!hole.shots.length) return;
+      hole.shots.forEach((shot) => {
+        const { category, sg } = shotSG(shot, hole.par, baseline);
+        if (category !== 'arg') return;
+        shots += 1;
+        sgTotal += sg;
+        if (shot.holed) holed += 1;
+        else if (shot.endLie === 'green') {
+          onGreen += 1;
+          leaveTotal += shot.endUnit === 'ft' ? Number(shot.endDist) : Number(shot.endDist) * 3;
+        }
+      });
+
+      const allowed = hole.par - 2;
+      const inReg = hole.shots.slice(0, allowed).some((s) => s.holed || s.endLie === 'green');
+      if (!inReg) {
+        chances += 1;
+        if (holeScore(hole) <= hole.par) made += 1;
+      }
+    });
+  });
+
+  return {
+    shots,
+    sgPerShot: shots ? sgTotal / shots : 0,
+    onGreenPct: shots ? Math.round(((onGreen + holed) / shots) * 100) : 0,
+    leaveFt: onGreen ? leaveTotal / onGreen : null,
+    holed,
+    upDown: { made, chances, pct: chances ? Math.round((made / chances) * 100) : 0 },
+  };
+}
+
+/**
  * One point per round, oldest first, normalised per 18 holes so a
  * weekday nine sits on the same scale as a full round.
  */

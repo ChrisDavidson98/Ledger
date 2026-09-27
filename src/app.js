@@ -49,6 +49,7 @@ import {
   playerSummary,
   nemesisHoles,
   clubDistances,
+  shortGameStats,
   distanceHistogram,
   clubGapping,
   holeRecords,
@@ -184,7 +185,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26o';
+const BUILD = '2026-09-26p';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -1910,6 +1911,7 @@ function renderBook(player = STATE.player) {
       <p class="callout" style="margin:14px 0 6px">${esc(CATEGORY_LABELS[focus.category])} is the leak. ${self
         ? `Bring it to your own level and save about ${focus.strokesPer18.toFixed(1)} a round.`
         : `Brought up to the rest of ${esc(player)}&rsquo;s game, it would save about ${focus.strokesPer18.toFixed(1)} a round.`}</p>
+      ${self ? `<button class="link-btn" data-action="stats-tab" data-tab="${focus.category}" style="padding:0">See the ${esc(CATEGORY_LABELS[focus.category].toLowerCase())} numbers &rsaquo;</button>` : ''}
       ${booking}` : `
       <p class="callout" style="margin:14px 0 0">${self
         ? 'No part of your game is dragging the rest. Keep doing what you are doing.'
@@ -2181,32 +2183,47 @@ function screenTeeTimeEdit() {
     </div>`;
 }
 
+/* --- Stats ---------------------------------------------------------
+   Organised the way the game is: an overview, then one tab per part
+   of it. Each part opens on the one number that matters — the
+   handicap it plays like — and then everything about that part, so
+   "how is my putting" has exactly one place to go.
+------------------------------------------------------------------ */
+
+const STATS_TABS = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'ott', label: 'Tee' },
+  { key: 'app', label: 'Approach' },
+  { key: 'arg', label: 'Short' },
+  { key: 'putt', label: 'Putting' },
+];
+
 function screenStats() {
   const allRounds = playerRounds();
   // Everything strokes-gained is computed from rounds that actually
   // carry shots. A score-only round has none, so including it would
   // dilute every average toward zero.
   const rounds = sgRounds(allRounds);
-  const scoreOnlyCount = allRounds.length - rounds.length;
+  const head = `<header class="topbar">
+      <div class="brand">Stats</div>
+      <div class="sub">${rounds.length} round${rounds.length === 1 ? '' : 's'} &middot; vs ${esc(benchName())}</div>
+    </header>`;
 
   if (allRounds.length === 0) {
-    return `${topbar(`${STATE.player} · Stats`)}
-      <div class="card">
-        <div class="empty">
-          <div class="glyph">&#128200;</div>
-          <div>Play a round and the patterns show up here.</div>
-        </div>
-      </div>`;
+    return `${head}
+      <div class="card"><div class="empty">Play a round and the patterns show up here.</div></div>`;
   }
 
   if (rounds.length === 0) {
-    return `${topbar(`${STATE.player} · Stats`)}
+    return `${head}
       ${renderTrendCard(trendSeries(allRounds, bench()), 'toPar')}
       <div class="card">
         <h2>No shot data yet</h2>
         <p class="muted">All ${allRounds.length} of your rounds are score only, so there is nothing to measure against the baseline. Track one round shot by shot and the rest of this page fills in.</p>
       </div>`;
   }
+
+  const tab = STATS_TABS.some((t) => t.key === STATE.statsTab) ? STATE.statsTab : 'overview';
 
   // Normalised per 18 holes, otherwise a weekday nine would drag the
   // average toward zero purely for being short.
@@ -2217,39 +2234,121 @@ function screenStats() {
     avg[c] = (total / holesPlayed) * 18;
   });
   const avgTotal = CATEGORIES.reduce((sum, c) => sum + avg[c], 0);
-  const nineCount = rounds.filter((r) => playedHoles(r).length <= 9).length;
-  const buckets = approachBuckets(rounds, bench());
-  const teeMiss = missTally(rounds, 'ott', bench());
-  const appMiss = missTally(rounds, 'app', bench());
 
-  const profile = handicapProfile({ ...avg, total: avgTotal });
+  // "Plays like" is always read against tour — it is a scale in its
+  // own right — while the SG figures follow the chosen benchmark.
+  const game = gameProfile(allRounds, { window: 1000, minRounds: 1 });
+  const ctx = { allRounds, rounds, holesPlayed, avg, avgTotal, game };
+
+  return `${head}
+    <div class="seg stats-tabs" role="tablist" style="margin-top:12px">
+      ${STATS_TABS.map((t) => `
+        <button role="tab" aria-selected="${t.key === tab}" class="${t.key === tab ? 'active' : ''}"
+                data-action="stats-tab" data-tab="${t.key}">${t.label}</button>`).join('')}
+    </div>
+    ${tab === 'overview' ? renderStatsOverview(ctx) : renderStatsPart(tab, ctx)}
+    <p class="tiny" style="text-align:center;margin:10px 0 0">Strokes gained vs ${esc(benchName())} &middot; change it in Rounds &rsaquo; Settings</p>`;
+}
+
+/** The headline for one part: the handicap it plays like, and its SG. */
+function renderPartHead(part, ctx) {
+  const { game, avg } = ctx;
+  const row = game ? game.profile.rows.find((r) => r.category === part) : null;
+  const good = row && row.handicap <= game.profile.overall + 0.5;
+  const upside = row ? upsideFor(row) : 0;
+  return `<div class="card" style="border-top:none;padding-top:14px">
+    <div class="split" style="align-items:flex-end">
+      <div>
+        <div class="eyebrow">${esc(CATEGORY_LABELS[part])} plays like</div>
+        <div class="part-num ${row ? (good ? 'sg-pos' : 'sg-neg') : ''}">${row ? (row.handicap <= 0.5 ? 'scr' : esc(fmtHandicapShort(row.handicap))) : '&ndash;'}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="eyebrow">SG / 18</div>
+        <div class="mono ${sgClass(avg[part])}" style="font-size:20px;font-weight:600">${fmtSG(avg[part])}</div>
+        ${upside >= 0.1 ? `<div class="eyebrow" style="font-size:9.5px">Worth ~${upside.toFixed(1)} a round</div>` : ''}
+      </div>
+    </div>
+    ${row ? `<p class="tiny" style="margin:6px 0 0">${good
+      ? `At or better than the rest of your game, which plays like ${esc(fmtHandicap(game.profile.overall))}.`
+      : `Behind the rest of your game, which plays like ${esc(fmtHandicap(game.profile.overall))}.`}</p>` : ''}
+  </div>`;
+}
+
+function renderStatsPart(part, ctx) {
+  const { rounds } = ctx;
+  const headline = renderPartHead(part, ctx);
+
+  if (part === 'ott') {
+    return `${headline}
+      ${renderTeeCard(teeOutcomes(rounds, bench()))}
+      ${renderMissCard('Tee shot misses', missTally(rounds, 'ott', bench()))}`;
+  }
+  if (part === 'app') {
+    const cd = clubDistances(rounds, bench());
+    return `${headline}
+      ${renderApproachCard(approachBuckets(rounds, bench()))}
+      ${renderMissCard('Approach misses', missTally(rounds, 'app', bench()))}
+      ${renderClubCard(cd)}${renderGappingCard(cd)}`;
+  }
+  if (part === 'arg') {
+    const s = shortGameStats(rounds, bench());
+    return `${headline}
+      <div class="card">
+        <h2>Around the green</h2>
+        ${s.shots ? `
+          <div class="stat-grid g4">
+            <div class="stat-box"><div class="val">${s.upDown.chances ? `${s.upDown.pct}%` : '&ndash;'}</div><div class="lbl">Up &amp; down</div></div>
+            <div class="stat-box"><div class="val">${s.leaveFt == null ? '&ndash;' : `${Math.round(s.leaveFt)}ft`}</div><div class="lbl">Avg leave</div></div>
+            <div class="stat-box"><div class="val">${s.onGreenPct}%</div><div class="lbl">On green</div></div>
+            <div class="stat-box"><div class="val ${sgClass(s.sgPerShot)}">${fmtSG(s.sgPerShot)}</div><div class="lbl">SG / shot</div></div>
+          </div>
+          <p class="tiny" style="margin-top:10px">${s.shots} shot${s.shots === 1 ? '' : 's'} from inside 30 yards${s.holed ? `, ${s.holed} holed` : ''}.
+            Up &amp; down is ${s.upDown.made} of ${s.upDown.chances} holes where the green was missed in regulation and you still made par or better.</p>`
+          : '<p class="muted">No shots from inside 30 yards logged yet.</p>'}
+      </div>`;
+  }
+  return `${headline}
+    ${renderPuttingCard(puttingBuckets(rounds, bench()))}`;
+}
+
+function renderStatsOverview(ctx) {
+  const { allRounds, rounds, holesPlayed, avg, avgTotal, game } = ctx;
   const gir = greensInRegulation(rounds);
   const tee = teeOutcomes(rounds, bench());
   const putts = puttingBuckets(rounds, bench());
+  const nineCount = rounds.filter((r) => playedHoles(r).length <= 9).length;
+  const profile = handicapProfile({ ...avg, total: avgTotal });
+  const implied = rollingImplied(rounds, { window: store.getHandicapWindow() });
 
-  const window = store.getHandicapWindow();
-  const implied = rollingImplied(rounds, { window });
+  const parts = game ? game.profile.rows.slice().sort((a, b) => b.handicap - a.handicap) : [];
 
-  return `${topbar(`${STATE.player} · Stats`)}
-    <div class="card">
-      <div class="split">
-        <h2>Benchmark</h2>
-        <span class="tiny">${esc(benchName())}</span>
-      </div>
-      <p class="muted">Which standard every strokes-gained figure below is measured against.</p>
-      ${benchPicker()}
-      <p class="tiny">${benchNote()} Nothing is rewritten when you change it &mdash; the shot records are the same, and this is only how they are read. It applies on this device alone, so two people can look at the same round against different standards.</p>
-    </div>
-
-    ${renderHandicapCard(profile, {
-      implied,
-      subtitle: `Across ${rounds.length} round${rounds.length === 1 ? '' : 's'}, ${holesPlayed} holes. Each part of your game translated to the handicap that normally plays it that well.`,
-    })}
+  return `
+    ${game ? `
+      <div class="card" style="border-top:none;padding-top:14px">
+        <div class="eyebrow">Plays like &middot; ${rounds.length} round${rounds.length === 1 ? '' : 's'}</div>
+        <h2 style="font-size:40px;margin:4px 0 0">Plays like <em class="${game.profile.overall <= 18 ? 'sg-pos' : ''}" style="font-style:italic">${esc(handicapWords(game.profile.overall))}.</em></h2>
+      </div>` : ''}
 
     ${renderTrendCard(trendSeries(allRounds, bench()))}
 
+    ${parts.length ? `
+      <div class="card">
+        <div class="eyebrow" style="margin-bottom:4px">Where the strokes go</div>
+        ${parts.map((row) => {
+          const good = row.handicap <= game.profile.overall + 0.5;
+          return `<button class="row" data-action="stats-tab" data-tab="${row.category}" style="min-height:44px;padding:10px 0">
+            <div class="row-meta"><div class="rname" style="font-weight:500">${esc(CATEGORY_LABELS[row.category])}</div></div>
+            <div class="row-val ${sgClass(avg[row.category])}" style="width:64px;text-align:right">${fmtSG(avg[row.category])}</div>
+            <div class="row-val ${good ? 'sg-pos' : 'sg-neg'}" style="width:40px;text-align:right">${row.handicap <= 0.5 ? 'scr' : esc(fmtHandicapShort(row.handicap))}</div>
+            <div class="row-val" style="width:14px;text-align:right">&rsaquo;</div>
+          </button>`;
+        }).join('')}
+        <p class="tiny" style="margin-top:8px">Strokes gained per 18, then the handicap each part plays like. Tap one for the detail.</p>
+      </div>` : ''}
+
     <div class="card">
-      <h2>The basics</h2>
+      <h2>Scoring</h2>
+      <p class="muted" style="margin:-4px 0 8px">Across ${rounds.length} round${rounds.length === 1 ? '' : 's'}${nineCount ? ` (${nineCount} of them nine holes)` : ''}, ${holesPlayed} holes.</p>
       <div class="stat-grid g4">
         <div class="stat-box"><div class="val">${gir.pct}%</div><div class="lbl">Greens</div></div>
         <div class="stat-box"><div class="val">${tee.fairwayPct}%</div><div class="lbl">Fairways</div></div>
@@ -2258,63 +2357,27 @@ function screenStats() {
       </div>
       ${gir.byPar.length > 1 ? `
         <label>Greens in regulation by par</label>
-        <div class="stat-grid" style="grid-template-columns:repeat(${gir.byPar.length},1fr)">
+        <div class="stat-grid" style="grid-template-columns:repeat(${gir.byPar.length},minmax(0,1fr))">
           ${gir.byPar.map((row) => `
             <div class="stat-box">
-              <div class="val" style="font-size:17px">${row.pct}%</div>
+              <div class="val" style="font-size:15px">${row.pct}%</div>
               <div class="lbl">Par ${row.par}</div>
               <div class="tiny">${row.greens}/${row.holes}</div>
             </div>`).join('')}
-        </div>
-        ${(() => {
-          // Say what these numbers actually are, then let the player's
-          // own data name the strong and weak hole type. Which par is
-          // hardest genuinely varies by golfer — better players tend to
-          // find par 5s easiest, since the shot that has to hold the
-          // green is a wedge, while a par 3 is one mid-iron with no
-          // chance to recover. Asserting a general rule here was wrong.
-          const ranked = gir.byPar.filter((r) => r.holes >= 3).slice().sort((a, b) => b.pct - a.pct);
-          if (ranked.length < 2) {
-            return `<p class="tiny" style="margin-top:6px">On in one on a par 3, two on a par 4, three on a par 5.</p>`;
-          }
-          const best = ranked[0];
-          const worst = ranked[ranked.length - 1];
-          return `<p class="tiny" style="margin-top:6px">On in one on a par 3, two on a par 4, three on a par 5.
-            ${best.pct === worst.pct
-              ? 'Yours are even across the three so far.'
-              : `Your strongest is <strong>par ${best.par}</strong> at ${best.pct}% and your weakest <strong>par ${worst.par}</strong> at ${worst.pct}%.`}</p>`;
-        })()}
-      ` : ''}
-    </div>
-
-    ${renderTeeCard(tee)}
-    ${renderPuttingCard(putts)}
-
-    <div class="card">
-      <h2>Average per 18 holes</h2>
-      <p class="muted">Across ${rounds.length} round${rounds.length === 1 ? '' : 's'}${nineCount ? ` (${nineCount} of them nine holes)` : ''}, ${holesPlayed} holes in all.</p>
-      <div class="stat-grid g4">
-        ${CATEGORIES.map((c) => `
-          <div class="stat-box">
-            <div class="val ${sgClass(avg[c])}">${fmtSG(avg[c])}</div>
-            <div class="lbl">${CATEGORY_SHORT[c]}</div>
-          </div>`).join('')}
-      </div>
+        </div>` : ''}
       <div style="text-align:center;margin-top:12px">
-        <span class="muted">Total </span>
-        <span class="mono ${sgClass(avgTotal)}" style="font-size:18px;font-weight:700">${fmtSG(avgTotal)}</span>
+        <span class="muted">Total strokes gained per 18 </span>
+        <span class="mono ${sgClass(avgTotal)}" style="font-size:16px;font-weight:700">${fmtSG(avgTotal)}</span>
       </div>
-      <p class="tiny" style="margin-top:10px">${benchNote()} Against tour, negatives are expected; against a handicap level, zero is that standard. What matters is which column is furthest from the others.</p>
     </div>
 
-    ${renderApproachCard(buckets)}
+    ${renderHandicapCard(profile, {
+      implied,
+      subtitle: `Across ${rounds.length} round${rounds.length === 1 ? '' : 's'}, ${holesPlayed} holes. Each part of your game translated to the handicap that normally plays it that well.`,
+    })}
 
-    ${renderMissCard('Tee shot misses', teeMiss)}
-    ${renderMissCard('Approach misses', appMiss)}
-    ${(() => { const cd = clubDistances(rounds, bench()); return renderClubCard(cd) + renderGappingCard(cd); })()}
     ${renderNemesisCard(rounds)}
     ${renderBestsCard(personalBests(rounds, bench()), allRounds)}
-    ${renderComparison()}
 
     <div class="card">
       <h2>Talk your game over</h2>
@@ -2329,60 +2392,6 @@ function screenStats() {
       <p class="tiny" style="margin-top:8px">A single round exports in more detail from its own page &mdash; shot by shot, with the holes that cost the most.</p>
       ${exportStatus()}
     </div>`;
-}
-
-/**
- * Everyone's numbers side by side. Normalised per 18 holes so a
- * weekday nine compares honestly against a full Saturday round.
- */
-function renderComparison() {
-  const everyone = sgRounds(store.getRounds());
-  const players = [...new Set(everyone.map((r) => r.player))].filter(Boolean);
-  if (players.length < 2) return '';
-
-  const rows = players.map((player) => {
-    const theirs = everyone.filter((r) => r.player === player);
-    const holes = theirs.reduce((sum, r) => sum + playedHoles(r).length, 0) || 1;
-    const totals = {};
-    CATEGORIES.forEach((c) => {
-      totals[c] = (theirs.reduce((sum, r) => sum + roundTotals(r, bench())[c], 0) / holes) * 18;
-    });
-    totals.total = CATEGORIES.reduce((sum, c) => sum + totals[c], 0);
-    return { player, rounds: theirs.length, holes, totals };
-  }).sort((a, b) => b.totals.total - a.totals.total);
-
-  // Who is best in each category, so the strengths stand out.
-  const best = {};
-  CATEGORIES.forEach((c) => {
-    best[c] = rows.reduce((top, row) => (row.totals[c] > top.totals[c] ? row : top), rows[0]).player;
-  });
-
-  return `<div class="card">
-    <h2>Head to head</h2>
-    <p class="muted">Strokes gained per 18 holes. The leader in each part of the game is marked.</p>
-    <div class="card-editor">
-      <div class="hdr" style="grid-template-columns:minmax(0,1fr) repeat(4,40px) 48px">
-        <span>Player</span>
-        ${CATEGORIES.map((c) => `<span style="text-align:center">${CATEGORY_SHORT[c]}</span>`).join('')}
-        <span style="text-align:center">Tot</span>
-      </div>
-      ${rows.map((row) => `
-        <div class="line" style="grid-template-columns:minmax(0,1fr) repeat(4,40px) 48px">
-          <span>
-            <strong>${esc(row.player)}</strong>
-            <span class="tiny">${row.rounds} round${row.rounds === 1 ? '' : 's'}</span>
-          </span>
-          ${CATEGORIES.map((c) => `
-            <span class="mono ${sgClass(row.totals[c])}" style="text-align:center;font-size:12px">
-              ${fmtSG(row.totals[c])}${best[c] === row.player ? '<br><span class="tiny sg-pos">best</span>' : ''}
-            </span>`).join('')}
-          <span class="mono ${sgClass(row.totals.total)}" style="text-align:center;font-size:12px;font-weight:700">
-            ${fmtSG(row.totals.total)}
-          </span>
-        </div>`).join('')}
-    </div>
-    <p class="tiny" style="margin-top:8px">${benchNote()} Everyone is measured against the same one, so these compare directly even off different tees.</p>
-  </div>`;
 }
 
 /**
@@ -4828,6 +4837,10 @@ const ACTIONS = {
   'view-player': (el) => go('player', { viewPlayer: el.getAttribute('data-player') }),
   'goto-club': () => go('clubhouse'),
   'h2h-with': (el) => go('clubhouse', { clubView: 'h2h', h2hOpponent: el.getAttribute('data-player') }),
+  'stats-tab': (el) => {
+    STATE.statsTab = el.getAttribute('data-tab');
+    if (STATE.screen === 'stats') { render(); window.scrollTo(0, 0); } else go('stats');
+  },
   'club-view': (el) => { STATE.clubView = el.getAttribute('data-view'); render(); },
   'wpw-mode': (el) => { STATE.wpwMode = el.getAttribute('data-mode'); render(); },
   'h2h-pick': (el) => { STATE.h2hOpponent = el.getAttribute('data-player'); render(); },
