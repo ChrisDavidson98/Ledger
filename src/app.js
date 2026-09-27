@@ -185,7 +185,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26q';
+const BUILD = '2026-09-26r';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -1165,6 +1165,68 @@ function screenSettings() {
 
   return `${topbar('Settings')}
     ${notices()}
+    ${renderAvatarPicker()}
+
+    <div class="card">
+      <h2>Appearance</h2>
+      <div class="chip-grid">
+        ${[['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']].map(([key, label]) => `
+          <button class="chip ${store.getTheme() === key ? 'active' : ''}" data-set-theme="${key}">${label}</button>
+        `).join('')}
+      </div>
+      <p class="tiny">Auto follows your phone's setting.</p>
+
+      <label>Distance entry</label>
+      <div class="chip-grid g2">
+        <button class="chip ${store.usePresets() ? '' : 'active'}" data-presets="off">Keypad</button>
+        <button class="chip ${store.usePresets() ? 'active' : ''}" data-presets="on">Buttons</button>
+      </div>
+      <p class="tiny">Buttons add common yardages and putt lengths under the keypad, for when you are pacing off a sprinkler head rather than reading a rangefinder. The keypad stays either way.</p>
+
+      <label>Club on approaches</label>
+      <div class="chip-grid g2">
+        <button class="chip ${store.trackClubs() ? '' : 'active'}" data-clubs="off">Off</button>
+        <button class="chip ${store.trackClubs() ? 'active' : ''}" data-clubs="on">Track</button>
+      </div>
+      <p class="tiny">Adds one optional tap on approach shots only &mdash; not tee shots, chips or putts. Enough to learn what each iron really goes without tripling the taps for answers you already know.</p>
+
+      <label>Miss direction</label>
+      <div class="chip-grid g2">
+        <button class="chip ${store.missInline() ? 'active' : ''}" data-miss-inline="on">On screen</button>
+        <button class="chip ${store.missInline() ? '' : 'active'}" data-miss-inline="off">Behind a tap</button>
+      </div>
+      <p class="tiny">On tee shots and approaches. On screen shows the grid under the distance so a miss is one tap; behind a tap keeps the screen shorter. Either way it is optional.</p>
+    </div>
+
+    <div class="card">
+      <h2>Benchmark</h2>
+      <p class="muted">Strokes gained answers "compared with whom". Tour is the default and is what every figure meant before this setting existed; the handicap levels ask the same question against somebody nearer your own game, where zero means you played to that standard.</p>
+      ${benchPicker()}
+      <p class="tiny">This is a way of reading the data, not a change to it. Every figure is recomputed from the shots exactly as they were logged, nothing is written back to the sheet, and the setting stays on this phone &mdash; so two people can look at the same round against different standards without either of them affecting the other.</p>
+      <p class="tiny">Only the tour table is measured data. The handicap levels are built from it plus the strokes a golfer at that level is expected to lose, spread across the positions a round passes through. Good enough to answer "was that a decent round for a 15", not a substitute for a real tour dataset at every level.</p>
+
+      <label>Rolling window</label>
+      <div class="chip-grid">
+        ${[5, 10, 20].map((n) => `
+          <button class="chip ${store.getHandicapWindow() === n ? 'active' : ''}" data-hcp-window="${n}">${n} rounds</button>
+        `).join('')}
+      </div>
+      <p class="tiny">How far back the per-category "plays like" figures look. Shorter follows form; longer is steadier but slower to notice you have got better.</p>
+    </div>
+
+    <div class="card">
+      <h2>Player</h2>
+      <p class="muted">Signed in as ${esc(STATE.player)}.</p>
+      <button class="btn-ghost" data-action="sign-out">Sign Out</button>
+      ${sync.isConfigured() ? `
+        <div class="btn-row">
+          <button class="btn-danger" data-action="lock-device">Forget Passphrase</button>
+        </div>
+        <p class="tiny">Sign Out just switches player. Forget Passphrase re-locks this phone &mdash; use it if you lose it or lend it out.</p>
+      ` : ''}
+    </div>
+
+    <div class="eyebrow" style="margin:26px 0 6px;padding-top:14px;border-top:3px double var(--rule-strong)">Group &amp; sheet setup</div>
     <div class="card">
       <button class="row" style="border:none;padding:0" data-action="open-courses">
         <div class="row-meta">
@@ -1174,7 +1236,55 @@ function screenSettings() {
         <div class="row-val">&rsaquo;</div>
       </button>
     </div>
-    ${renderAvatarPicker()}
+
+    ${sync.hasUrl() ? `
+      <div class="card">
+        <h2>Add another phone</h2>
+        <p class="muted">Send this link to whoever is joining. Opening it points their phone at the sheet, so all they have to type is their name and the passphrase.</p>
+        <button class="btn-ghost" data-action="copy-setup-link">Copy Setup Link</button>
+        <p class="tiny">The link carries the sheet address only &mdash; never the passphrase. Tell them that separately, and not in the same message.</p>
+      </div>` : ''}
+
+    ${renderRosterCard()}
+
+    ${sync.isConfigured() ? `
+      <div class="card">
+        <div class="split">
+          <h2>Deleted rounds</h2>
+          <span class="tiny">kept on the sheet</span>
+        </div>
+        <p class="muted">Deleting moves a round out of the way rather than destroying it. Anything here can come back.</p>
+        ${STATE.archive === null ? `
+          <button class="btn-ghost" data-action="load-archive" ${STATE.syncBusy ? 'disabled' : ''}>Show Deleted Rounds</button>
+        ` : STATE.archive.length === 0 ? `
+          <div class="empty" style="padding:18px"><div>Nothing deleted.</div></div>
+        ` : STATE.archive.map((r) => `
+          <div class="row">
+            <div class="badge">${fmtToPar(r.toPar)}</div>
+            <div class="row-meta">
+              <div class="rname">${esc(r.courseName)} <span class="tiny">${esc(r.player)}</span></div>
+              <div class="rsub">${fmtDate(r.date)} &middot; ${r.score} strokes${r.mode === 'score' ? ' &middot; score only' : ''}</div>
+            </div>
+            <button class="chip" data-action="restore-round" data-id="${esc(r.id)}"
+                    style="min-height:38px;padding:0 14px">Restore</button>
+          </div>`).join('')}
+      </div>` : ''}
+
+    <div class="card">
+      <h2>This device</h2>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="val">${store.getRounds().length}</div><div class="lbl">Rounds</div></div>
+        <div class="stat-box"><div class="val">${pending}</div><div class="lbl">Unsynced</div></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-ghost" data-action="full-pull" ${sync.isConfigured() && !STATE.syncBusy ? '' : 'disabled'}>Pull Everything</button>
+        <button class="btn-ghost" data-action="push-all" ${sync.isConfigured() && !STATE.syncBusy ? '' : 'disabled'}>Push Everything</button>
+      </div>
+      <p class="tiny">Pull re-reads the whole sheet rather than only what changed &mdash; use it on a new phone. Push re-sends every round on this phone, which is what to reach for if a round is missing from the sheet or was written before a format change.</p>
+      ${store.pendingDeletions().length ? `
+        <p class="tiny sg-neg">${store.pendingDeletions().length} deleted round${store.pendingDeletions().length === 1 ? '' : 's'} still to be removed from the sheet &mdash; they go on the next sync.</p>` : ''}
+    </div>
+
     <div class="card">
       <h2>Google Sheet backend</h2>
       <p class="muted">Paste the Web App URL from your Apps Script deployment and the shared secret you set on it. Setup steps are in <span class="mono">apps-script/README.md</span>.</p>
@@ -1213,113 +1323,6 @@ function screenSettings() {
       <p class="tiny">This app is build <strong>${esc(BUILD)}</strong>, running from the <strong>${isStandalone() ? 'home screen' : 'browser tab'}</strong>. On a phone those two keep separate data, so a name signed in on one is not signed in on the other.</p>
       <p class="tiny">Check Which Version asks the URL what it is serving, without needing the passphrase. Use it when two phones disagree &mdash; if they report different contract numbers, one is pointed at an older deployment.</p>
       ${STATE.syncStatus ? `<div class="${STATE.syncStatus.bad ? 'err-box' : 'ok-box'}">${esc(STATE.syncStatus.text)}</div>` : ''}
-    </div>
-
-    <div class="card">
-      <h2>This device</h2>
-      <div class="stat-grid">
-        <div class="stat-box"><div class="val">${store.getRounds().length}</div><div class="lbl">Rounds</div></div>
-        <div class="stat-box"><div class="val">${pending}</div><div class="lbl">Unsynced</div></div>
-      </div>
-      <div class="btn-row">
-        <button class="btn-ghost" data-action="full-pull" ${sync.isConfigured() && !STATE.syncBusy ? '' : 'disabled'}>Pull Everything</button>
-        <button class="btn-ghost" data-action="push-all" ${sync.isConfigured() && !STATE.syncBusy ? '' : 'disabled'}>Push Everything</button>
-      </div>
-      <p class="tiny">Pull re-reads the whole sheet rather than only what changed &mdash; use it on a new phone. Push re-sends every round on this phone, which is what to reach for if a round is missing from the sheet or was written before a format change.</p>
-      ${store.pendingDeletions().length ? `
-        <p class="tiny sg-neg">${store.pendingDeletions().length} deleted round${store.pendingDeletions().length === 1 ? '' : 's'} still to be removed from the sheet &mdash; they go on the next sync.</p>` : ''}
-    </div>
-
-    ${sync.hasUrl() ? `
-      <div class="card">
-        <h2>Add another phone</h2>
-        <p class="muted">Send this link to whoever is joining. Opening it points their phone at the sheet, so all they have to type is their name and the passphrase.</p>
-        <button class="btn-ghost" data-action="copy-setup-link">Copy Setup Link</button>
-        <p class="tiny">The link carries the sheet address only &mdash; never the passphrase. Tell them that separately, and not in the same message.</p>
-      </div>` : ''}
-
-    <div class="card">
-      <h2>Benchmark</h2>
-      <p class="muted">Strokes gained answers "compared with whom". Tour is the default and is what every figure meant before this setting existed; the handicap levels ask the same question against somebody nearer your own game, where zero means you played to that standard.</p>
-      ${benchPicker()}
-      <p class="tiny">This is a way of reading the data, not a change to it. Every figure is recomputed from the shots exactly as they were logged, nothing is written back to the sheet, and the setting stays on this phone &mdash; so two people can look at the same round against different standards without either of them affecting the other.</p>
-      <p class="tiny">Only the tour table is measured data. The handicap levels are built from it plus the strokes a golfer at that level is expected to lose, spread across the positions a round passes through. Good enough to answer "was that a decent round for a 15", not a substitute for a real tour dataset at every level.</p>
-
-      <label>Rolling window</label>
-      <div class="chip-grid">
-        ${[5, 10, 20].map((n) => `
-          <button class="chip ${store.getHandicapWindow() === n ? 'active' : ''}" data-hcp-window="${n}">${n} rounds</button>
-        `).join('')}
-      </div>
-      <p class="tiny">How far back the per-category "plays like" figures look. Shorter follows form; longer is steadier but slower to notice you have got better.</p>
-    </div>
-
-    <div class="card">
-      <h2>Appearance</h2>
-      <div class="chip-grid">
-        ${[['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']].map(([key, label]) => `
-          <button class="chip ${store.getTheme() === key ? 'active' : ''}" data-set-theme="${key}">${label}</button>
-        `).join('')}
-      </div>
-      <p class="tiny">Auto follows your phone's setting.</p>
-
-      <label>Distance entry</label>
-      <div class="chip-grid g2">
-        <button class="chip ${store.usePresets() ? '' : 'active'}" data-presets="off">Keypad</button>
-        <button class="chip ${store.usePresets() ? 'active' : ''}" data-presets="on">Buttons</button>
-      </div>
-      <p class="tiny">Buttons add common yardages and putt lengths under the keypad, for when you are pacing off a sprinkler head rather than reading a rangefinder. The keypad stays either way.</p>
-
-      <label>Club on approaches</label>
-      <div class="chip-grid g2">
-        <button class="chip ${store.trackClubs() ? '' : 'active'}" data-clubs="off">Off</button>
-        <button class="chip ${store.trackClubs() ? 'active' : ''}" data-clubs="on">Track</button>
-      </div>
-      <p class="tiny">Adds one optional tap on approach shots only &mdash; not tee shots, chips or putts. Enough to learn what each iron really goes without tripling the taps for answers you already know.</p>
-
-      <label>Miss direction</label>
-      <div class="chip-grid g2">
-        <button class="chip ${store.missInline() ? 'active' : ''}" data-miss-inline="on">On screen</button>
-        <button class="chip ${store.missInline() ? '' : 'active'}" data-miss-inline="off">Behind a tap</button>
-      </div>
-      <p class="tiny">On tee shots and approaches. On screen shows the grid under the distance so a miss is one tap; behind a tap keeps the screen shorter. Either way it is optional.</p>
-    </div>
-
-    ${sync.isConfigured() ? `
-      <div class="card">
-        <div class="split">
-          <h2>Deleted rounds</h2>
-          <span class="tiny">kept on the sheet</span>
-        </div>
-        <p class="muted">Deleting moves a round out of the way rather than destroying it. Anything here can come back.</p>
-        ${STATE.archive === null ? `
-          <button class="btn-ghost" data-action="load-archive" ${STATE.syncBusy ? 'disabled' : ''}>Show Deleted Rounds</button>
-        ` : STATE.archive.length === 0 ? `
-          <div class="empty" style="padding:18px"><div>Nothing deleted.</div></div>
-        ` : STATE.archive.map((r) => `
-          <div class="row">
-            <div class="badge">${fmtToPar(r.toPar)}</div>
-            <div class="row-meta">
-              <div class="rname">${esc(r.courseName)} <span class="tiny">${esc(r.player)}</span></div>
-              <div class="rsub">${fmtDate(r.date)} &middot; ${r.score} strokes${r.mode === 'score' ? ' &middot; score only' : ''}</div>
-            </div>
-            <button class="chip" data-action="restore-round" data-id="${esc(r.id)}"
-                    style="min-height:38px;padding:0 14px">Restore</button>
-          </div>`).join('')}
-      </div>` : ''}
-
-    ${renderRosterCard()}
-
-    <div class="card">
-      <h2>Player</h2>
-      <p class="muted">Signed in as ${esc(STATE.player)}.</p>
-      <button class="btn-ghost" data-action="sign-out">Sign Out</button>
-      ${sync.isConfigured() ? `
-        <div class="btn-row">
-          <button class="btn-danger" data-action="lock-device">Forget Passphrase</button>
-        </div>
-        <p class="tiny">Sign Out just switches player. Forget Passphrase re-locks this phone &mdash; use it if you lose it or lend it out.</p>
-      ` : ''}
     </div>
 
     <button class="btn-ghost" data-action="goto-history">&larr; Back</button>`;
