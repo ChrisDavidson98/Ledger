@@ -452,6 +452,28 @@ check('club distances come from what the shot advanced', () => {
   return eq(Math.round(clubs[0].typical), 150, '7i distance');
 });
 
+check('with nothing logged, 150 yards suggests a 7-iron', () =>
+  eq(M.suggestClub(150, []), '7i', 'suggested club'));
+
+check('your own number beats the stock one once there are three shots', () => {
+  const mine = [{ club: '8i', shots: 3, typical: 150 }, { club: '7i', shots: 3, typical: 162 }];
+  return eq(M.suggestClub(150, mine), '8i', 'suggested club');
+});
+
+check('stepping a club stops at the ends of the bag', () =>
+  eq(M.stepClub('LW', 1), 'LW', 'past the lob wedge') || eq(M.stepClub('7i', -1), '6i', 'club up'));
+
+check('291 from the sand to 1 ft is questioned', () =>
+  M.implausibleShot({ lie: 'sand', dist: 291 }, { lie: 'green', dist: 1 }).length ? null : 'not flagged');
+
+check('a putt that ends 60 yards away in the rough is questioned', () =>
+  M.implausibleShot({ lie: 'green', dist: 1 }, { lie: 'rough', dist: 60 }).length ? null : 'not flagged');
+
+check('an ordinary approach is left alone', () => {
+  const doubts = M.implausibleShot({ lie: 'fairway', dist: 150 }, { lie: 'green', dist: 20 });
+  return doubts.length ? doubts.join(' ') : null;
+});
+
 check('a shot with a penalty does not count toward a club', () => {
   const r = roundOf([{ par: 4, yards: 400, shots: [
     shot('tee', 400, 'fairway', 160),

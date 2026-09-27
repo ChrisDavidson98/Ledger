@@ -157,6 +157,88 @@ export function clubDistances(rounds, baseline = 'tour') {
 }
 
 /**
+ * Stock distances for someone with nothing logged yet — a 7-iron at
+ * 150 and roughly ten yards a club either side. Long irons are left
+ * out: most bags no longer carry them, and a suggestion nobody owns
+ * is worse than none. Your own logged number replaces any of these as
+ * soon as it exists, and a logged 2i or 3i joins the list the same way.
+ */
+export const GENERIC_CLUB_YARDS = {
+  '3W': 215, '5W': 200, 'Hyb': 185, '4i': 170, '5i': 165, '6i': 160,
+  '7i': 150, '8i': 140, '9i': 130, 'PW': 120, 'GW': 105, 'SW': 90, 'LW': 75,
+};
+
+/** Shots with a club before its own number is trusted over the stock one. */
+const OWN_CLUB_MIN_SHOTS = 3;
+
+/**
+ * The club whose typical distance is nearest the yardage.
+ *
+ * Pass the output of clubDistances so the player's own numbers win
+ * wherever there are enough of them. Nothing beyond the longest club
+ * or inside the shortest is refused — the answer is just the end of
+ * the bag, which is what you would be hitting anyway.
+ */
+export function suggestClub(yards, clubs = []) {
+  if (!(yards > 0)) return null;
+  const table = { ...GENERIC_CLUB_YARDS };
+  clubs.forEach((c) => {
+    if (c.shots >= OWN_CLUB_MIN_SHOTS) table[c.club] = c.typical;
+  });
+  let best = null;
+  Object.entries(table).forEach(([club, carry]) => {
+    const off = Math.abs(carry - yards);
+    if (!best || off < best.off) best = { club, off };
+  });
+  return best.club;
+}
+
+/** One club longer (step -1) or shorter (step +1) through the bag. */
+export function stepClub(club, step) {
+  const i = CLUBS.indexOf(club);
+  if (i < 0) return club;
+  return CLUBS[Math.max(0, Math.min(CLUBS.length - 1, i + step))];
+}
+
+/**
+ * The furthest a ball can plausibly be advanced from each lie.
+ * Generous on purpose — this is for catching a mis-tap, not for
+ * doubting a good shot.
+ */
+const MAX_ADVANCE_YARDS = { tee: 380, fairway: 300, rough: 260, sand: 230, recovery: 200 };
+
+/**
+ * Reasons a shot looks like a mis-entry, or an empty list.
+ *
+ * `start` is where it began ({ lie, dist } in the lie's own unit),
+ * `end` where it finished ({ lie, dist }, lie 'holed' for in). Each
+ * reason is a sentence to put in front of the player; none of them
+ * blocks the shot, because every one of them can genuinely happen.
+ */
+export function implausibleShot(start, end) {
+  const toYards = (lie, dist) => (unitForLie(lie) === 'ft' ? dist / 3 : dist);
+  const startY = toYards(start.lie, Number(start.dist));
+  const reasons = [];
+
+  if (end.lie === 'holed') {
+    if (startY > 250) reasons.push(`Holed from ${Math.round(startY)} yards?`);
+    return reasons;
+  }
+  const endY = toYards(end.lie, Number(end.dist));
+  const advanced = startY - endY;
+  const cap = MAX_ADVANCE_YARDS[start.lie];
+
+  if (start.lie === 'green' && end.lie !== 'green' && endY > startY) {
+    reasons.push(`A putt from the green that finished ${Math.round(endY)} yards away in the ${end.lie}?`);
+  } else if (cap && advanced > cap) {
+    reasons.push(`That is ${Math.round(advanced)} yards from the ${start.lie}.`);
+  } else if (start.lie !== 'green' && startY > 150 && end.lie === 'green' && endY <= 1) {
+    reasons.push(`From ${Math.round(startY)} yards to ${Math.round(end.dist)} ft?`);
+  }
+  return reasons;
+}
+
+/**
  * Distances grouped into bins, for drawing the shape of a club rather
  * than just its ends. Small samples produce a sparse chart, which is
  * the honest picture of a small sample.

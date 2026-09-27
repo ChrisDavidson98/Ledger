@@ -849,6 +849,16 @@ input.stepper-input:focus { outline: none; }
 }
 .field strong { font-family: var(--font-mono); font-size: 12px; font-weight: 600; text-transform: uppercase; }
 .field.has-penalty { border-color: var(--loss); }
+.field-club { flex: 1.6 1 0; padding: 0; gap: 0; }
+.field-club .club-step {
+  width: 40px; align-self: stretch; border: none; background: transparent;
+  color: var(--text); font-size: 20px;
+}
+.field-club .club-name {
+  flex: 1; min-width: 0; align-self: stretch; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; border: none; background: transparent; color: var(--text);
+}
+.field-club.is-suggested strong { color: var(--text-3); }
 .field.has-penalty strong, .field.has-penalty .eyebrow { color: var(--loss); }
 
 .dock-play {

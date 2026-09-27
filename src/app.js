@@ -52,6 +52,9 @@ import {
   shortGameStats,
   distanceHistogram,
   clubGapping,
+  suggestClub,
+  stepClub,
+  implausibleShot,
   holeRecords,
   missTally,
   groupLeaderboard,
@@ -648,6 +651,15 @@ function screenPlay() {
     startUnit: start.unit,
   });
   const showForm = STATE.editShotIdx != null || !hole.done;
+  // A new approach arrives with a club already picked from the
+  // distance, so logging the shot is enough to record it. `undefined`
+  // means untouched; a club cleared on purpose is null and stays so.
+  const draft = STATE.draft;
+  if (showForm && !editing && store.trackClubs() && category === 'app'
+      && draft.club === undefined && start.unit === 'y') {
+    draft.club = suggestClub(Number(start.dist), myClubDistances());
+    draft.clubSuggested = !!draft.club;
+  }
   // Score through finished holes only: a hole in progress would read
   // as three under after the tee shot.
   const finished = round.holes.filter((h) => h.done);
@@ -664,6 +676,17 @@ function screenPlay() {
       </div>
     </header>
     ${notices()}
+    ${STATE.amending ? `
+      <div class="card">
+        <div class="split">
+          <div><strong>Editing a saved round</strong>
+            <p class="tiny" style="margin:2px 0 0">Tap a shot to change it. Nothing is saved until you do.</p></div>
+        </div>
+        <div class="btn-row" style="margin-top:10px">
+          <button class="btn-ghost" data-action="amend-cancel">Cancel</button>
+          <button class="btn-primary" data-action="amend-save">Save changes</button>
+        </div>
+      </div>` : ''}
     ${STATE.holePicker ? renderHolePicker(round) : ''}
 
     <div class="card" style="border-top:none;padding-top:14px">
@@ -678,7 +701,7 @@ function screenPlay() {
 
     ${showForm ? renderShotForm(hole, start, category, shotNum) : renderHoleComplete(hole)}
 
-    ${played > 0 && !hole.done && !editing ? `
+    ${played > 0 && !hole.done && !editing && !STATE.amending ? `
       <div style="text-align:center;margin:4px 0 8px">
         <button class="link-btn muted-link" data-action="end-round">End round here</button>
       </div>` : ''}
@@ -873,9 +896,13 @@ function renderShotForm(hole, start, category, shotNum) {
 
     <div class="field-row">
       ${clubs ? `
-        <button class="field" data-action="open-sheet" data-sheet="club">
-          <span class="eyebrow">Club</span><strong>${esc(draft.club || '—')}</strong>
-        </button>` : ''}
+        <div class="field field-club${draft.clubSuggested ? ' is-suggested' : ''}">
+          <button class="club-step" data-action="club-step" data-step="-1" aria-label="Club up">&minus;</button>
+          <button class="club-name" data-action="open-sheet" data-sheet="club" aria-label="Club: ${esc(draft.club || 'none')}. Tap for all clubs.">
+            <span class="eyebrow">${draft.clubSuggested ? 'Club?' : 'Club'}</span><strong>${esc(draft.club || '—')}</strong>
+          </button>
+          <button class="club-step" data-action="club-step" data-step="1" aria-label="Club down">+</button>
+        </div>` : ''}
       ${misses && !store.missInline() ? `
         <button class="field" data-action="open-sheet" data-sheet="miss">
           <span class="eyebrow">Miss</span><strong>${esc(draft.miss ? (draft.miss === 'target' ? 'Hit it' : MISS_LABELS[draft.miss]) : '—')}</strong>
@@ -940,7 +967,7 @@ function renderHoleComplete(hole) {
         </div>`).join('')}
     </div>
     <button class="btn-primary" style="margin-top:14px" data-action="next-hole">
-      ${last ? 'Finish Round' : `Hole ${hole.hole + 1} →`}
+      ${last ? (STATE.amending ? 'Save changes' : 'Finish Round') : `Hole ${hole.hole + 1} →`}
     </button>
     <div class="btn-row">
       <button class="btn-ghost" data-action="undo-shot">Undo Last Shot</button>
@@ -1561,6 +1588,7 @@ function screenDetail() {
     ${exportCard(round)}
     <div class="btn-row">
       <button class="btn-ghost" data-action="goto-history">&larr; Back</button>
+      ${isScoreOnly(round) ? '' : `<button class="btn-ghost" data-action="amend-round" data-id="${esc(round.id)}">Edit shots</button>`}
       <button class="btn-danger" data-action="delete-round" data-id="${esc(round.id)}">Delete</button>
     </div>`;
 }
@@ -4000,6 +4028,19 @@ function go(screen, extra = {}) {
   render();
 }
 
+/**
+ * Your own club distances, for suggesting a club mid-round. Worked out
+ * once per round rather than on every tap; nothing hit today should
+ * move the number between one shot and the next.
+ */
+function myClubDistances() {
+  const key = `${STATE.player}|${STATE.round && STATE.round.id}`;
+  if (!STATE.clubCache || STATE.clubCache.key !== key) {
+    STATE.clubCache = { key, clubs: clubDistances(playerRounds(), bench()) };
+  }
+  return STATE.clubCache.clubs;
+}
+
 function saveShot() {
   const hole = STATE.round.holes[STATE.holeIdx];
   const editIdx = STATE.editShotIdx;
@@ -4009,6 +4050,12 @@ function saveShot() {
     : lieAfter(hole);
   const draft = STATE.draft;
   const holed = draft.endLie === 'holed';
+
+  // A slip of the thumb — 1 ft where 91 was meant — is easy to make
+  // and hard to find weeks later in the sheet, so ask while the shot
+  // is still fresh. Never blocks: every one of these can happen.
+  const doubts = implausibleShot(start, { lie: draft.endLie, dist: draft.endDist });
+  if (doubts.length && !confirm(`${doubts.join(' ')}\n\nLog it anyway?`)) return;
 
   const shot = newShot({
     shotNum: editing ? editIdx + 1 : hole.shots.length + 1,
@@ -4033,7 +4080,7 @@ function saveShot() {
 
   relinkHole(hole);
   STATE.draft = {};
-  store.saveActiveRound(STATE.round);
+  persistPlay();
   render();
 }
 
@@ -4045,7 +4092,7 @@ function deleteShot() {
   relinkHole(hole);
   STATE.editShotIdx = null;
   STATE.draft = {};
-  store.saveActiveRound(STATE.round);
+  persistPlay();
   render();
 }
 
@@ -4071,7 +4118,7 @@ function undoShot() {
   hole.shots.pop();
   hole.done = false;
   STATE.draft = {};
-  store.saveActiveRound(STATE.round);
+  persistPlay();
   render();
 }
 
@@ -4079,11 +4126,56 @@ function nextHole() {
   if (STATE.holeIdx >= STATE.round.holes.length - 1) return finishRound();
   STATE.holeIdx += 1;
   STATE.draft = {};
-  store.saveActiveRound(STATE.round);
+  persistPlay();
   render();
 }
 
+/**
+ * Keep the round on screen safe. A round being played is written on
+ * every tap, since a phone can die on the 14th. A saved round being
+ * corrected is not: it is a copy, and nothing reaches storage or the
+ * sheet until Save changes, so Cancel leaves the original untouched.
+ */
+function persistPlay() {
+  if (!STATE.amending) store.saveActiveRound(STATE.round);
+}
+
+/**
+ * Open a saved round in the hole-by-hole screen to fix a mis-entered
+ * shot. Blocked while a round is being played, because both would
+ * need the same screen and the live one must not be disturbed.
+ */
+function beginAmend(id) {
+  if (STATE.round && !isRoundComplete(STATE.round)) {
+    alert('Finish or discard the round in progress first.');
+    return;
+  }
+  const saved = store.getRound(id);
+  if (!saved) return;
+  STATE.round = JSON.parse(JSON.stringify(saved));
+  STATE.amending = true;
+  STATE.editShotIdx = null;
+  STATE.draft = {};
+  go('play', { holeIdx: 0, holePicker: true });
+}
+
+function leaveAmend(saved) {
+  const id = STATE.round.id;
+  if (saved) {
+    // saveRound queues it, and the sheet replaces the round's rows by
+    // id rather than adding a second copy.
+    store.saveRound(STATE.round);
+    sync.syncInBackground(null, { force: true });
+  }
+  STATE.amending = false;
+  STATE.round = null;
+  STATE.editShotIdx = null;
+  STATE.draft = {};
+  go('detail', { viewRoundId: id });
+}
+
 function finishRound() {
+  if (STATE.amending) return leaveAmend(true);
   const round = STATE.round;
   round.finishedAt = new Date().toISOString();
   store.saveRound(round);
@@ -4132,7 +4224,7 @@ function startRound(optionKey) {
   STATE.holeIdx = 0;
   STATE.draft = {};
   STATE.setupCourseId = null;
-  store.saveActiveRound(STATE.round);
+  persistPlay();
   go(mode === 'score' ? 'scorecard' : 'play');
 }
 
@@ -4366,7 +4458,7 @@ function startScheduledRound(teeTimeId) {
   });
   STATE.holeIdx = 0;
   STATE.draft = {};
-  store.saveActiveRound(STATE.round);
+  persistPlay();
 
   // The tee time has served its purpose; marking it played keeps it
   // out of tomorrow's banner without deleting the record of it.
@@ -4856,7 +4948,7 @@ const ACTIONS = {
   'start-round': (el) => startRound(el.getAttribute('data-option')),
   'fill-par': () => {
     STATE.round.holes.forEach((h) => { if (h.score == null) h.score = h.par; });
-    store.saveActiveRound(STATE.round);
+    persistPlay();
     render();
   },
 
@@ -4905,6 +4997,12 @@ const ACTIONS = {
   'club-view': (el) => { STATE.clubView = el.getAttribute('data-view'); render(); },
   'wpw-mode': (el) => { STATE.wpwMode = el.getAttribute('data-mode'); render(); },
   'h2h-pick': (el) => { STATE.h2hOpponent = el.getAttribute('data-player'); render(); },
+  'club-step': (el) => {
+    const d = STATE.draft;
+    d.club = d.club ? stepClub(d.club, Number(el.getAttribute('data-step'))) : '7i';
+    d.clubSuggested = false;
+    render();
+  },
   'open-sheet': (el) => { STATE.sheet = el.getAttribute('data-sheet'); render(); },
   'close-sheet': () => { STATE.sheet = null; render(); },
   // None, +1, +2, back to none: penalties are rare enough that one
@@ -4918,6 +5016,12 @@ const ACTIONS = {
   'end-round': () => {
     if (!confirm('End the round here and save it?')) return;
     finishRound();
+  },
+  'amend-round': (el) => beginAmend(el.getAttribute('data-id')),
+  'amend-save': () => leaveAmend(true),
+  'amend-cancel': () => {
+    if (!confirm('Throw away the changes to this round?')) return;
+    leaveAmend(false);
   },
   'view-round': (el) => go('detail', { viewRoundId: el.getAttribute('data-id') }),
   'delete-round': (el) => {
@@ -5328,13 +5432,14 @@ function onClick(event) {
     STATE.holePicker = false;
     STATE.editShotIdx = null;
     STATE.draft = {};
-    store.saveActiveRound(STATE.round);
+    persistPlay();
     return render();
   }
 
   const club = target.getAttribute('data-club');
   if (club) {
     STATE.draft.club = STATE.draft.club === club ? null : club;
+    STATE.draft.clubSuggested = false;
     STATE.sheet = null;
     return render();
   }
@@ -5428,7 +5533,7 @@ function onClick(event) {
     // First tap on an untouched hole lands on par, then adjusts from there.
     const current = hole.score == null ? hole.par : hole.score + Number(scoreStep);
     hole.score = Math.max(1, Math.min(20, current));
-    store.saveActiveRound(STATE.round);
+    persistPlay();
     return render();
   }
 
