@@ -849,6 +849,13 @@ input.stepper-input:focus { outline: none; }
 }
 .field strong { font-family: var(--font-mono); font-size: 12px; font-weight: 600; text-transform: uppercase; }
 .field.has-penalty { border-color: var(--loss); }
+.review-card { border-left: 3px solid var(--loss); padding-left: 14px; padding-right: 14px; }
+.review-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 0; border: none; border-top: 1px solid var(--rule, var(--control));
+  background: transparent; color: var(--text); text-align: left; font: inherit;
+}
+.review-item > span:nth-child(2) { flex: 1; min-width: 0; }
 .field-club { flex: 1.6 1 0; padding: 0; gap: 0; }
 .field-club .club-step {
   width: 40px; align-self: stretch; border: none; background: transparent;

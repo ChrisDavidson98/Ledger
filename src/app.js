@@ -31,6 +31,7 @@ import {
   holeTotals,
   roundTotals,
   holeScore,
+  roundReview,
   roundScore,
   roundPar,
   roundToPar,
@@ -991,10 +992,31 @@ function recapButton(round) {
   </div>`;
 }
 
+/**
+ * Anything in the round worth a second look, each one tap from being
+ * fixed. Absent when there is nothing, so a clean round looks exactly
+ * as it always did. The round is already saved either way.
+ */
+function reviewCard(round) {
+  const items = roundReview(round);
+  if (!items.length) return '';
+  return `<div class="card review-card">
+    <h2 style="margin-bottom:4px">Worth a look</h2>
+    <p class="tiny" style="margin:0 0 8px">Saved already. Tap one to open that hole and change it, or leave it if it is right.</p>
+    ${items.map((item) => `
+      <button class="review-item" data-action="review-hole" data-id="${esc(round.id)}" data-hole="${item.holeIdx}">
+        <span class="badge">${item.hole}</span>
+        <span>${esc(item.text)}</span>
+        <span class="muted">&rsaquo;</span>
+      </button>`).join('')}
+  </div>`;
+}
+
 function screenSummary() {
   const round = STATE.round || store.getRound(STATE.viewRoundId);
   if (!round) return screenHome();
   return `${topbar('Round Complete')}
+    ${reviewCard(round)}
     ${recapButton(round)}
     ${roundReport(round)}
     ${exportCard(round)}
@@ -1597,6 +1619,7 @@ function screenDetail() {
   const round = store.getRound(STATE.viewRoundId);
   if (!round) return screenHistory();
   return `${topbar('Round Detail')}
+    ${reviewCard(round)}
     ${recapButton(round)}
     ${roundReport(round)}
     ${exportCard(round)}
@@ -4081,6 +4104,7 @@ function saveShot() {
     penalty: Number(draft.penalty || 0),
     miss: draft.miss || null,
     club: draft.club || null,
+    clubGuess: !!draft.clubSuggested,
   });
 
   if (editing) {
@@ -4159,7 +4183,7 @@ function persistPlay() {
  * shot. Blocked while a round is being played, because both would
  * need the same screen and the live one must not be disturbed.
  */
-function beginAmend(id) {
+function beginAmend(id, holeIdx = null) {
   if (STATE.round && !isRoundComplete(STATE.round)) {
     alert('Finish or discard the round in progress first.');
     return;
@@ -4170,7 +4194,7 @@ function beginAmend(id) {
   STATE.amending = true;
   STATE.editShotIdx = null;
   STATE.draft = {};
-  go('play', { holeIdx: 0, holePicker: true });
+  go('play', holeIdx == null ? { holeIdx: 0, holePicker: true } : { holeIdx, holePicker: false });
 }
 
 function leaveAmend(saved) {
@@ -5034,6 +5058,7 @@ const ACTIONS = {
     finishRound();
   },
   'amend-round': (el) => beginAmend(el.getAttribute('data-id')),
+  'review-hole': (el) => beginAmend(el.getAttribute('data-id'), Number(el.getAttribute('data-hole'))),
   'amend-save': () => leaveAmend(true),
   'amend-cancel': () => {
     if (!confirm('Throw away the changes to this round?')) return;

@@ -88,6 +88,7 @@ export function newShot({
   penalty = 0,
   miss = null,
   club = null,
+  clubGuess = false,
 }) {
   return {
     n: shotNum,
@@ -101,7 +102,60 @@ export function newShot({
     penalty,
     miss,
     club,
+    // The club was the app's suggestion and never touched. Local only:
+    // the sheet has no column for it, and it only matters until the
+    // round has been looked over.
+    ...(clubGuess && club ? { clubGuess: true } : {}),
   };
+}
+
+/**
+ * Things in a finished round worth a second look, or an empty list.
+ *
+ * Nothing here is an error — every one can genuinely happen — so it
+ * is offered after the round rather than demanded during it. Each
+ * item names the hole it is on, so it can open straight to it.
+ */
+export function roundReview(round) {
+  if (round.mode === 'score') return [];
+  const items = [];
+  const lastPlayed = round.holes.reduce((last, h, i) => (h.shots.length ? i : last), -1);
+  const guessed = [];
+
+  round.holes.forEach((hole, i) => {
+    const at = { holeIdx: i, hole: hole.hole };
+    // A blank hole only counts if play carried on past it; blanks at
+    // the end are just a round ended early.
+    if (!hole.shots.length) {
+      if (i < lastPlayed) items.push({ ...at, text: 'No shots logged.' });
+      return;
+    }
+    const last = hole.shots[hole.shots.length - 1];
+    if (!last.holed) items.push({ ...at, text: 'Never holed out.' });
+    const score = holeScore(hole);
+    if (last.holed && score >= hole.par + 4) {
+      items.push({ ...at, text: `${score} on a par ${hole.par}.` });
+    }
+    hole.shots.forEach((shot) => {
+      const doubts = implausibleShot(
+        { lie: shot.startLie, dist: shot.startDist },
+        { lie: shot.holed ? 'holed' : shot.endLie, dist: shot.endDist },
+      );
+      if (doubts.length) items.push({ ...at, text: `Shot ${shot.n}: ${doubts[0]}` });
+      if (shot.clubGuess) guessed.push(hole.hole);
+    });
+  });
+
+  if (guessed.length) {
+    const holes = [...new Set(guessed)];
+    items.push({
+      holeIdx: round.holes.findIndex((h) => h.hole === holes[0]),
+      hole: holes[0],
+      text: `${guessed.length} shot${guessed.length === 1 ? '' : 's'} kept the suggested club without it being checked (hole${holes.length === 1 ? '' : 's'} ${holes.join(', ')}).`,
+      guesses: true,
+    });
+  }
+  return items;
 }
 
 /**

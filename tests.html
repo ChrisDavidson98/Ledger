@@ -486,6 +486,36 @@ check('an ordinary approach is left alone', () => {
   return doubts.length ? doubts.join(' ') : null;
 });
 
+check('review flags an unlikely shot, a guessed club and a blank hole mid-round', () => {
+  const r = roundOf([
+    { par: 5, yards: 526, shots: [
+      shot('tee', 526, 'sand', 291),
+      shot('sand', 291, 'green', 1),
+      shot('green', 1, null, null, { holed: true }) ] },
+    { par: 4, yards: 400, shots: [] },
+    { par: 4, yards: 400, shots: [
+      shot('tee', 400, 'fairway', 150),
+      M.newShot({ shotNum: 2, startLie: 'fairway', startDist: 150, endLie: 'green', endDist: 20, club: '7i', clubGuess: true }),
+      shot('green', 20, null, null, { holed: true }) ] },
+    { par: 4, yards: 400, shots: [] },
+  ]);
+  const items = M.roundReview(r);
+  const on = (hole, re) => items.some((i) => i.hole === hole && re.test(i.text));
+  if (!on(1, /Shot 2/)) return 'sand shot not flagged';
+  if (!on(2, /No shots/)) return 'blank hole 2 not flagged';
+  if (items.some((i) => i.hole === 4)) return 'trailing blank hole flagged';
+  if (!items.some((i) => i.guesses)) return 'guessed club not flagged';
+  return null;
+});
+
+check('a clean round has nothing to review', () => {
+  const r = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'fairway', 150),
+    shot('fairway', 150, 'green', 20, { club: '7i' }),
+    shot('green', 20, null, null, { holed: true }) ] }]);
+  return M.roundReview(r).length ? JSON.stringify(M.roundReview(r)) : null;
+});
+
 check('a shot with a penalty does not count toward a club', () => {
   const r = roundOf([{ par: 4, yards: 400, shots: [
     shot('tee', 400, 'fairway', 160),
