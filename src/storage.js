@@ -8,7 +8,7 @@
    pushing, so wiring it up won't touch any calling code.
 --------------------------------------------------------------- */
 
-import { CLUBS, DEFAULT_BAG } from './baseline.js';
+import { CLUBS, DEFAULT_BAG, DEFAULT_BENCHMARK } from './baseline.js';
 
 const PREFIX = 'ledger:';
 const KEYS = {
@@ -242,7 +242,16 @@ export function getTheme() {
  * nothing recomputed this way is ever written back to the sheet.
  */
 export function getBenchmark() {
-  return getPrefs().benchmark || 'tour';
+  const chosen = getPrefs().benchmark;
+  if (chosen) return chosen;
+  // Against tour nearly every row an amateur sees says "costing
+  // strokes", which teaches a new player nothing. New devices start at
+  // a 10 handicap instead. A device that already holds rounds was
+  // reading tour before this default existed, so it keeps tour rather
+  // than having every number shift under it. Settled once, then stored.
+  const fallback = getRounds().length ? 'tour' : DEFAULT_BENCHMARK;
+  setPref('benchmark', fallback);
+  return fallback;
 }
 
 export function setBenchmark(key) {

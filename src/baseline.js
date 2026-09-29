@@ -287,7 +287,7 @@ export function gapShape(lie, dist) {
 
 /**
  * The benchmarks offered in the UI. `handicap: null` is the tour
- * table itself, untouched — the default, and what every figure in the
+ * table itself, untouched — what every figure in the
  * app meant before benchmarks existed.
  */
 export const BENCHMARKS = [
@@ -299,7 +299,8 @@ export const BENCHMARKS = [
   { key: 'hcp20', label: '20 handicap', short: '20', handicap: 20 },
 ];
 
-export const DEFAULT_BENCHMARK = 'tour';
+/** What a brand-new device starts on; see getBenchmark in storage.js. */
+export const DEFAULT_BENCHMARK = 'hcp10';
 
 /** The lowest and highest levels the tables cover, for clamping. */
 export const BENCHMARK_HANDICAPS = BENCHMARKS
