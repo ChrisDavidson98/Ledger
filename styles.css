@@ -1218,3 +1218,11 @@ button.stand-row {
 .club-shot.is-out .club-carry { color: var(--text-3); text-decoration: line-through; }
 .club-shot.is-out .rname { color: var(--text-3); }
 .club-shot.is-out .club-pill { background: none; color: var(--text-2); border: 1px solid var(--control); }
+
+/* --- Approach play: strokes per round, drawn from the middle -------- */
+.app-bar { position: relative; height: 8px; margin: 5px 0 4px; }
+.app-bar { background: color-mix(in srgb, var(--text) 6%, transparent); border-radius: 2px; }
+.app-bar.two-sided::before { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--text-3); }
+.app-bar-fill { position: absolute; top: 0; height: 8px; border-radius: 2px; }
+.app-bar-fill.lost { background: var(--loss); }
+.app-bar-fill.won { background: var(--gain); }

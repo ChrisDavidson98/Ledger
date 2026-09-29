@@ -80,7 +80,6 @@ import {
 
 import {
   sgByCategoryChart,
-  approachByDistanceChart,
   rollingMean,
 } from './charts.js';
 
@@ -1210,7 +1209,7 @@ function renderRoundBreakdown(round) {
     </div>
 
     ${renderTeeCard(tee)}
-    ${renderApproachCard(buckets)}
+    ${renderApproachCard(buckets, { single: true })}
     ${renderPuttingCard(putts)}
     ${renderMissCard('Tee shot misses', missTally(rounds, 'ott', bench()))}
     ${renderMissCard('Approach misses', missTally(rounds, 'app', bench()))}`;
@@ -1686,7 +1685,57 @@ function screenDetail() {
       <button class="btn-ghost" data-action="goto-history">&larr; Back</button>
       ${isScoreOnly(round) ? '' : `<button class="btn-ghost" data-action="amend-round" data-id="${esc(round.id)}">Edit shots</button>`}
       <button class="btn-danger" data-action="delete-round" data-id="${esc(round.id)}">Delete</button>
-    </div>`;
+    </div>
+    ${renderReteeCard(round)}`;
+}
+
+/** The layout a round was played on, found again by its label. */
+function roundLayout(round, course) {
+  return playOptions(course).find((o) => o.label === round.layout) || null;
+}
+
+/**
+ * Wrong tees picked at the start. Offered only when the course and the
+ * layout can still be found, since the new yardages come from the card.
+ */
+function renderReteeCard(round) {
+  const course = store.getCourse(round.courseId);
+  const option = course && roundLayout(round, course);
+  if (!option) return '';
+  const others = (course.teeNames || []).filter((t) => t !== round.teeName);
+  if (!others.length) return '';
+  return `<details class="card more-numbers" style="margin-top:12px">
+    <summary>Played the wrong tees? Change from ${esc(round.teeName)}</summary>
+    <p class="tiny" style="margin:4px 0 8px">Each hole takes the new tee's yardage. Tee shots are re-measured from it, so drive
+      distances and strokes gained on tee shots change. Everything after the tee shot stays as it was logged.</p>
+    <div class="chip-grid" style="grid-template-columns:repeat(${Math.min(others.length, 3)},1fr);gap:6px">
+      ${others.map((t) => `<button class="chip" style="min-height:44px" data-action="retee-round" data-id="${esc(round.id)}" data-tee="${esc(t)}">
+        ${esc(t)} &middot; ${totalYards(course, option, t)}y</button>`).join('')}
+    </div>
+  </details>`;
+}
+
+/**
+ * Move a finished round onto different tees: new yardage per hole, then
+ * relink so each tee shot starts from it. Holes are matched by position
+ * in the layout, which is how the round was built in the first place.
+ */
+function reteeRound(id, teeName) {
+  const round = store.getRound(id);
+  const course = round && store.getCourse(round.courseId);
+  const option = course && roundLayout(round, course);
+  if (!option) return;
+  if (!confirm(`Move ${round.player}'s round at ${round.courseName} from ${round.teeName} to ${teeName} tees? Tee-shot distances will be re-measured.`)) return;
+  const fresh = buildRoundHoles(course, option, teeName);
+  round.holes.forEach((hole, i) => {
+    if (!fresh[i] || !Number.isFinite(fresh[i].yards)) return;
+    hole.yards = fresh[i].yards;
+    if (hole.shots && hole.shots.length) relinkHole(hole);
+  });
+  round.teeName = teeName;
+  store.saveRound(round);
+  sync.syncInBackground(null, { force: true });
+  render();
 }
 
 /* --- Calendar ----------------------------------------------------
@@ -2434,7 +2483,7 @@ function renderStatsPart(part, ctx) {
     return `${renderPartHead(part, ctx)}
       ${renderGreenCard(rounds)}
       ${trend}
-      ${renderApproachCard(approachBuckets(rounds, bench()))}
+      ${renderApproachCard(approachBuckets(rounds, bench()), { perRound: 18 / ctx.holesPlayed })}
       ${renderBagCard(rounds)}${renderGappingCard(cd)}`;
   }
   if (part === 'arg') {
@@ -3112,30 +3161,64 @@ function shotPath(shot) {
   return `${LIE_LABELS[shot.startLie]} ${fmtDist(shot.startDist, shot.startUnit)} &rarr; ${esc(to)}${miss}${pen}`;
 }
 
-function renderApproachCard(buckets) {
+/**
+ * Approaches by distance. Each row's bar is what that distance costs
+ * (or earns) per round — how often you are there times what each swing
+ * costs — so the longest bar is the biggest leak, whether it comes from
+ * one bad yardage or a merely weak one you face all the time. The
+ * per-swing figure stays on the right for the other question.
+ *
+ * `perRound` scales a total to one round: 18 / holes played on Stats,
+ * 1 for a single round's page.
+ */
+function renderApproachCard(buckets, { perRound = 1, single = false } = {}) {
   if (!buckets.length) return '';
   const thin = buckets.filter((b) => b.shots < THIN_SAMPLE).length;
+  const round = (b) => b.sg * perRound;
+  const widest = Math.max(0.3, ...buckets.map((b) => Math.abs(round(b))));
+  const trusted = buckets.filter((b) => b.shots >= THIN_SAMPLE);
+  const worst = trusted.slice().sort((a, b) => round(a) - round(b))[0];
+  const best = trusted.slice().sort((a, b) => round(b) - round(a))[0];
+  const when = single ? 'this round' : 'a round';
+  const label = (b) => `${String(b.label).replace('-', '–')} yds`;
+
+  let headline = '';
+  if (worst && round(worst) <= -0.1) {
+    headline = `${label(worst)} costs you ${Math.abs(round(worst)).toFixed(1)} strokes ${when} &mdash; the most of any distance.`;
+  } else if (best && round(best) > 0.1) {
+    headline = `Nothing here is costing you much. ${label(best)} earns you ${round(best).toFixed(1)} ${when}.`;
+  }
+
   return `<div class="card">
     <h2>Approach play</h2>
-    <p class="muted">Strokes gained and average proximity by distance. Approach starts at 30 yards &mdash; anything closer counts as short game. Tap a row to see the shots.</p>
-    ${/*
-       The chart says which yardage is bleeding shots; the rows below
-       carry the proximity and the counts, which a chart cannot hold
-       without becoming three charts.
-    */''}
-    ${approachByDistanceChart(buckets, { thinBelow: THIN_SAMPLE, label: benchName() })}
-    ${buckets.map((b) => drillRow(`app:${b.label}`, `
+    ${headline ? `<p class="green-headline" style="margin:0 0 6px">${headline}</p>` : ''}
+    <p class="muted">Each bar is the strokes that distance costs you ${when} (coral) or earns you (green) &mdash; how often you are there, times what each swing costs. Tap a row to see the shots.</p>
+    ${buckets.map((b) => {
+      // Two-sided only when something actually gains; if every distance
+      // loses, a centre line would just waste half the bar.
+      const twoSided = buckets.some((k) => round(k) > 0.05);
+      const w = (Math.abs(round(b)) / widest) * (twoSided ? 50 : 100);
+      const lost = round(b) < 0;
+      const place = !twoSided ? 'left:0' : lost ? 'right:50%' : 'left:50%';
+      return drillRow(`app:${b.label}`, `
         ${rangeTag(b.label, 'yds')}
         <div class="row-meta">
-          <div class="rname">${b.shots} shot${b.shots === 1 ? '' : 's'}${thinMark(b.shots)}</div>
+          <div class="split">
+            <span class="rname">${b.shots} shot${b.shots === 1 ? '' : 's'}${thinMark(b.shots)}</span>
+            <span class="tiny mono ${sgVerdict(round(b), 'round').cls}">${fmtSG(round(b))}${single ? '' : '/rd'}</span>
+          </div>
+          <div class="app-bar ${twoSided ? 'two-sided' : ''}" aria-hidden="true">
+            <span class="app-bar-fill ${lost ? 'lost' : 'won'}" style="${place};width:${w.toFixed(1)}%"></span>
+          </div>
           <div class="rsub">${b.proximityCount
-            ? `Found the green ${b.proximityCount} of ${b.shots}, ${Math.round(b.proximitySum / b.proximityCount)}ft away on average`
-            : 'never finished on the green'}</div>
+            ? `${b.proximityCount} of ${b.shots} on the green &middot; ${Math.round(b.proximitySum / b.proximityCount)} ft away`
+            : 'never found the green'}</div>
         </div>
         ${sgValue(b.sg / b.shots)}`,
-      thinStyle(b.shots), b.detail, shotPath)).join('')}
-    <p class="tiny" style="margin-top:8px">Bars and figures are the per-shot average, with the number of shots under each band. The bucket costing most per swing is where practice pays${
-      thin ? `, but ${thin === 1 ? 'the faded row has' : 'faded rows have'} under ${THIN_SAMPLE} shots &mdash; not enough to trust yet` : ''
+      thinStyle(b.shots), b.detail, shotPath);
+    }).join('')}
+    <p class="tiny" style="margin-top:8px">The number on the right is per swing. A short bar with a bad per-swing number is a distance you rarely face${
+      thin ? `; ${thin === 1 ? 'the faded row has' : 'faded rows have'} under ${THIN_SAMPLE} shots &mdash; not enough to trust yet` : ''
     }.</p>
   </div>`;
 }
@@ -5599,6 +5682,7 @@ const ACTIONS = {
     render();
   },
   'amend-round': (el) => beginAmend(el.getAttribute('data-id')),
+  'retee-round': (el) => reteeRound(el.getAttribute('data-id'), el.getAttribute('data-tee')),
   'review-hole': (el) => beginAmend(el.getAttribute('data-id'), Number(el.getAttribute('data-hole'))),
   'amend-save': () => leaveAmend(true),
   'amend-cancel': () => {
