@@ -291,6 +291,10 @@ export function gapShape(lie, dist) {
  * app meant before benchmarks existed.
  */
 export const BENCHMARKS = [
+  // Not a fixed level: the app swaps in the handicap the player's own
+  // game plays like before anything is computed (see bench() in app.js).
+  // Anything that receives the bare key reads it as tour.
+  { key: 'self', label: 'Your level', short: 'You', handicap: null, self: true },
   { key: 'tour', label: 'Tour', short: 'Tour', handicap: null },
   { key: 'scratch', label: 'Scratch', short: 'Scr', handicap: 0 },
   { key: 'hcp5', label: '5 handicap', short: '5', handicap: 5 },
@@ -300,7 +304,10 @@ export const BENCHMARKS = [
 ];
 
 /** What a brand-new device starts on; see getBenchmark in storage.js. */
-export const DEFAULT_BENCHMARK = 'hcp10';
+export const DEFAULT_BENCHMARK = 'self';
+
+/** The key for "measure me against my own level". */
+export const SELF_BENCHMARK = 'self';
 
 /** The lowest and highest levels the tables cover, for clamping. */
 export const BENCHMARK_HANDICAPS = BENCHMARKS
@@ -308,7 +315,7 @@ export const BENCHMARK_HANDICAPS = BENCHMARKS
   .map((b) => b.handicap);
 
 export function findBenchmark(key) {
-  return BENCHMARKS.find((b) => b.key === key) || BENCHMARKS[0];
+  return BENCHMARKS.find((b) => b.key === key) || BENCHMARKS.find((b) => b.key === 'tour');
 }
 
 export function benchmarkLabel(key) {

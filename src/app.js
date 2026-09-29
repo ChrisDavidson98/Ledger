@@ -20,6 +20,7 @@ import {
   unitForLie,
   tracksMiss,
   BENCHMARKS,
+  SELF_BENCHMARK,
   benchmarkLabel,
 } from './baseline.js';
 
@@ -209,10 +210,30 @@ const BUILD = '2026-09-26t';
 ------------------------------------------------------------------ */
 
 function bench() {
-  return store.getBenchmark();
+  const chosen = store.getBenchmark();
+  return chosen === SELF_BENCHMARK ? selfLevel() : chosen;
+}
+
+let selfLevelCache = null;
+
+/**
+ * The handicap the player's own game plays like, used as a benchmark
+ * so every figure reads "better or worse than the rest of my game".
+ * Always solved against tour, which is what keeps it from chasing its
+ * own tail. With no shot rounds yet it stands in at a 10 handicap.
+ */
+function selfLevel() {
+  const rounds = playerRounds();
+  const key = `${STATE.player}|${rounds.length}|${rounds.map((r) => r.updatedAt || r.date).join()}`;
+  if (selfLevelCache && selfLevelCache.key === key) return selfLevelCache.value;
+  const game = gameProfile(rounds, { window: 1000, minRounds: 1 });
+  const value = game ? Math.round(Math.max(0, game.profile.overall) * 10) / 10 : 10;
+  selfLevelCache = { key, value };
+  return value;
 }
 
 function benchName() {
+  if (store.getBenchmark() === SELF_BENCHMARK) return `your level (${fmtHandicap(selfLevel())})`;
   return benchmarkLabel(bench()).toLowerCase();
 }
 
@@ -228,8 +249,8 @@ function benchNote() {
 
 /** The compact picker that sits on any screen full of SG figures. */
 function benchPicker() {
-  const current = bench();
-  return `<div class="chip-grid" style="grid-template-columns:repeat(6,1fr);gap:6px">
+  const current = store.getBenchmark();
+  return `<div class="chip-grid" style="grid-template-columns:repeat(${BENCHMARKS.length},1fr);gap:6px">
     ${BENCHMARKS.map((b) => `
       <button class="chip ${current === b.key ? 'active' : ''}" data-benchmark="${esc(b.key)}"
               style="padding:7px 0;font-size:11px;min-height:36px"
@@ -1893,7 +1914,9 @@ function handicapWords(value) {
   const n = Math.round(value);
   if (n <= 0) return 'scratch';
   if (n > 30) return `${n > 36 ? '36+' : n}`;
-  return `a ${HANDICAP_WORDS[n]}`;
+  const word = HANDICAP_WORDS[n];
+  // "an eight", "an eleven", "an eighteen" — go by the sound, not the letter.
+  return `${/^(eight|eleven)/.test(word) ? 'an' : 'a'} ${word}`;
 }
 
 /**
@@ -2486,6 +2509,9 @@ function renderStatsOverview(ctx) {
       <div style="text-align:center;margin-top:12px">
         <span class="muted">Total strokes gained per 18 </span>
         <span class="mono ${sgClass(avgTotal)}" style="font-size:16px;font-weight:700">${fmtSG(avgTotal)}</span>
+        ${store.getBenchmark() === SELF_BENCHMARK && game ? `
+          <div class="tiny" style="margin-top:4px">Against your own level the total sits near zero by design &mdash; the parts above show where it comes from.
+            Against tour you are <span class="mono ${sgClass(game.per18.total)}">${fmtSG(game.per18.total)}</span> per 18.</div>` : ''}
       </div>
     </div>
 
