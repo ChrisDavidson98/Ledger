@@ -544,6 +544,42 @@ function eachShot(rounds, baseline, visit) {
 }
 
 /**
+ * Lag putts: first putts from `lo` feet and out, and how far each one
+ * left you. The distance left is simply where the next putt started,
+ * so nothing extra is logged — and nothing about direction is known,
+ * which is why the view never pretends to show it.
+ *
+ * A first putt that ran off the green is left out: its "distance left"
+ * is in yards from somewhere else, not feet from the hole.
+ */
+export function lagPutts(rounds, { lo = 20, hi = Infinity } = {}) {
+  const lags = [];
+  rounds.forEach((round) => {
+    round.holes.forEach((hole) => {
+      const putts = hole.shots.filter((s) => s.startLie === 'green');
+      const first = putts[0];
+      if (!first || !(first.startDist >= lo && first.startDist < hi)) return;
+      if (!first.holed && first.endLie !== 'green') return;
+      lags.push({
+        id: `${round.id}-${hole.hole}`,
+        from: first.startDist,
+        left: first.holed ? 0 : Number(first.endDist) || 0,
+        putts: putts.length,
+      });
+    });
+  });
+  const threePutts = lags.filter((l) => l.putts >= 3).length;
+  const inside3 = lags.filter((l) => l.left <= 3).length;
+  return {
+    lags,
+    total: lags.length,
+    threePutts,
+    inside3,
+    avgLeft: lags.length ? lags.reduce((s, l) => s + l.left, 0) / lags.length : null,
+  };
+}
+
+/**
  * Putting by the distance of the first putt on each hole. Everything
  * after it — the lag, the come-backer, a three-putt — belongs to the
  * band it started in, so "from 30ft+" means what a golfer means by it:

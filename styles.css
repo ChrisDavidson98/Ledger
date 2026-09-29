@@ -1190,3 +1190,6 @@ button.stand-row {
 .tee-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
 .tee-stats span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); }
 .tee-stats strong { font-size: 19px; }
+
+/* --- Lag putting --------------------------------------------------- */
+.lag-map { display: block; width: 100%; max-width: 360px; height: auto; margin: 8px auto 4px; }

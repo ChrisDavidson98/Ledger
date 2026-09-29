@@ -46,6 +46,7 @@ import {
   approachGreen,
   greenVerdict,
   teeSides,
+  lagPutts,
   teeSideVerdict,
   GREEN_BANDS,
   puttingBuckets,
@@ -171,6 +172,7 @@ const STATE = {
   viewTeeTimeId: null,
   missMode: 'count',     // miss grid shaded by frequency, or by cost
   greenBand: 'all',      // distance chip on the approach green view
+  lagBand: 'all',        // distance chip on the lag putting view
   teeMode: 'count',      // tee map: how often, or what it costs
   teeZone: null,         // tee map side picked; null means the costliest
   repairPlan: null,      // previewed scorecard repair, before anything is written
@@ -2448,7 +2450,9 @@ function renderStatsPart(part, ctx) {
           : '<p class="muted">No shots from inside 30 yards logged yet.</p>'}
       </div>`;
   }
-  return `${headline}
+  return `${renderPartHead(part, ctx)}
+    ${renderLagCard(rounds)}
+    ${trend}
     ${renderPuttingCard(puttingBuckets(rounds, bench()))}`;
 }
 
@@ -3083,6 +3087,83 @@ function renderBestsCard(bests, allRounds) {
         </div>
         <div class="row-val" style="font-size:17px;color:var(--green-mid)">${value}</div>
       </div>`).join('')}
+  </div>`;
+}
+
+const LAG_BANDS = [
+  { key: 'all', label: 'All 20+', lo: 20, hi: Infinity },
+  { key: '20', label: '20–30', lo: 20, hi: 30 },
+  { key: '30', label: '30+', lo: 30, hi: Infinity },
+];
+
+/** Feet from the hole to the edge of the lag drawing; longer leaves sit on the rim. */
+const LAG_MAX_FT = 12;
+
+/**
+ * Long first putts as balls around a hole, each at the distance it
+ * left, to scale. Which way round the hole a ball sits means nothing —
+ * direction is not logged — so the angle only spreads them out, and
+ * the drawing says so rather than letting it be read as a pattern.
+ */
+function renderLagCard(rounds) {
+  const band = LAG_BANDS.find((b) => b.key === STATE.lagBand) || LAG_BANDS[0];
+  if (!lagPutts(rounds).total) return '';
+  const lag = lagPutts(rounds, band);
+  const pct = (n) => (lag.total ? Math.round((n / lag.total) * 100) : 0);
+  const thin = lag.total < GREEN_MIN_SHOTS;
+  const rate = pct(lag.threePutts);
+
+  const S = 320;
+  const c = S / 2;
+  const R = 142;
+  const px = (ft) => (Math.min(ft, LAG_MAX_FT) / LAG_MAX_FT) * R;
+  const golden = Math.PI * (3 - Math.sqrt(5));
+
+  const balls = lag.lags
+    .slice()
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((l, i) => {
+      const a = i * golden;
+      const r = Math.max(px(l.left), l.left > 0 ? 7 : 0);
+      const three = l.putts >= 3;
+      return `<circle cx="${(c + Math.cos(a) * r).toFixed(1)}" cy="${(c + Math.sin(a) * r).toFixed(1)}" r="5"
+        fill="${three ? 'var(--loss)' : 'var(--text)'}" fill-opacity="${three ? 0.95 : 0.8}"/>`;
+    }).join('');
+
+  const headline = rate >= 30 ? 'Your lag leaves too much.' : 'Lag putting is under control.';
+
+  return `<div class="card">
+    <h2>Lag putting</h2>
+    <p class="muted">Every first putt from 20 feet and out, placed as far from the hole as it finished. White two-putted; coral took three or more.</p>
+    <div class="chip-grid" style="grid-template-columns:repeat(3,1fr);gap:6px">
+      ${LAG_BANDS.map((b) => `<button class="chip ${b.key === band.key ? 'active' : ''}" data-lag-band="${b.key}"
+          aria-pressed="${b.key === band.key}" style="min-height:44px;font-size:11px">${b.label}</button>`).join('')}
+    </div>
+    ${lag.total ? `
+      <svg class="lag-map" viewBox="0 0 ${S} ${S + 22}" role="img" style="${thin ? 'opacity:0.55' : ''}"
+           aria-label="${lag.total} lag putts, ${pct(lag.inside3)}% finished inside 3 feet, ${lag.threePutts} three-putts">
+        <circle cx="${c}" cy="${c}" r="${R + 8}" fill="var(--gain)" fill-opacity="0.12" stroke="var(--gain)" stroke-opacity="0.4"/>
+        <circle cx="${c}" cy="${c}" r="${px(6)}" fill="none" stroke="var(--text-2)" stroke-dasharray="4 4" stroke-opacity="0.7"/>
+        <circle cx="${c}" cy="${c}" r="${px(3)}" fill="var(--gain)" fill-opacity="0.12" stroke="var(--text-2)" stroke-opacity="0.9"/>
+        <text x="${c + px(3) * 0.72 + 3}" y="${c - px(3) * 0.72 - 3}" class="green-label" fill="var(--text-2)" style="font-size:11px">3 FT</text>
+        <text x="${c + px(6) * 0.72 + 3}" y="${c - px(6) * 0.72 - 3}" class="green-label" fill="var(--text-3)" style="font-size:11px">6 FT</text>
+        <text x="${c + R * 0.72 + 2}" y="${c - R * 0.72 - 2}" class="green-label" fill="var(--text-3)" style="font-size:11px">${LAG_MAX_FT}+ FT</text>
+        <circle cx="${c}" cy="${c}" r="4" fill="var(--bg)" stroke="var(--text)" stroke-width="1.5"/>
+        ${balls}
+        <text x="${c}" y="${S + 16}" text-anchor="middle" class="green-label" fill="var(--text-3)" style="font-size:11px">RING = FEET LEFT · DIRECTION NOT LOGGED</text>
+      </svg>
+      <div class="tee-stats">
+        <div><span>Putts</span><strong class="mono">${lag.total}</strong></div>
+        <div><span>Inside 3 ft</span><strong class="mono">${pct(lag.inside3)}%</strong></div>
+        <div><span>3-putts</span><strong class="mono ${lag.threePutts ? 'sg-neg' : ''}">${lag.threePutts}</strong></div>
+        <div><span>Rate</span><strong class="mono ${rate >= 30 ? 'sg-neg' : ''}">${rate}%</strong></div>
+      </div>
+      ${thin
+        ? `<p class="tiny" style="margin-top:8px"><span class="thin-tag">LOW SAMPLE</span> Only ${lag.total} long first putt${lag.total === 1 ? '' : 's'} here &mdash; not enough to read yet.</p>`
+        : `<h3 class="green-headline">${headline}</h3>
+           <p style="margin:2px 0 0">Your first putt leaves ${lag.avgLeft.toFixed(1)} feet on average, and ${pct(lag.inside3)}% finish inside 3 feet${
+             rate >= 30 ? ` &mdash; the rest are where the ${lag.threePutts} three-putts come from.` : '.'}</p>`}`
+      : '<p class="muted">No first putts from this distance yet.</p>'}
   </div>`;
 }
 
@@ -5684,7 +5765,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-dist-step],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-bag-club],[data-miss-inline],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-green-band],[data-tee-mode],[data-tee-zone],[data-smooth],[data-hcp-window],[data-repair-course]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-dist-step],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-bag-club],[data-miss-inline],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-green-band],[data-lag-band],[data-tee-mode],[data-tee-zone],[data-smooth],[data-hcp-window],[data-repair-course]');
   if (!target) return;
 
   const benchmark = target.getAttribute('data-benchmark');
@@ -5698,6 +5779,9 @@ function onClick(event) {
 
   const greenBand = target.getAttribute('data-green-band');
   if (greenBand) { STATE.greenBand = greenBand; return render(); }
+
+  const lagBand = target.getAttribute('data-lag-band');
+  if (lagBand) { STATE.lagBand = lagBand; return render(); }
 
   const teeMode = target.getAttribute('data-tee-mode');
   if (teeMode) { STATE.teeMode = teeMode; return render(); }

@@ -262,6 +262,21 @@ check('tee verdict: the rarer side costing double is the miss to take off', () =
   return v && v.includes('Left is the miss to take off the course') ? null : v;
 });
 
+check('lag view reads the distance left from where the putt finished', () => {
+  const r = roundOf([
+    { par: 4, yards: 400, shots: [shot('tee', 400, 'fairway', 150), shot('fairway', 150, 'green', 35),
+      shot('green', 35, 'green', 7), shot('green', 7, 'green', 2), shot('green', 2, null, null, { holed: true })] },
+    { par: 4, yards: 400, shots: [shot('tee', 400, 'fairway', 150), shot('fairway', 150, 'green', 22),
+      shot('green', 22, null, null, { holed: true })] },
+    { par: 4, yards: 400, shots: [shot('tee', 400, 'fairway', 150), shot('fairway', 150, 'green', 12),
+      shot('green', 12, 'green', 1), shot('green', 1, null, null, { holed: true })] },
+  ]);
+  const all = M.lagPutts([r]);
+  if (all.total !== 2) return `a 12-footer is not a lag; got ${all.total}`;
+  if (all.threePutts !== 1 || all.inside3 !== 1) return JSON.stringify(all);
+  return M.lagPutts([r], { lo: 30 }).lags[0].left === 7 ? null : 'left should be 7';
+});
+
 /* --- Editing shots ---------------------------------------------- */
 
 suite('Editing');
