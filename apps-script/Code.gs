@@ -73,6 +73,9 @@ var SHEETS = {
     'start_lie', 'start_dist', 'start_unit',
     'end_lie', 'end_dist', 'end_unit',
     'holed', 'penalty', 'miss', 'club', 'category', 'sg',
+    // Appended, like every new column. 'yes' when the player left this
+    // shot out of the club's distance; strokes gained ignores it.
+    'no_distance',
   ],
   // One row per hole per tee per nine. A course is a facility made of
   // nines, so the nine is part of the key, not the 18-hole block.
@@ -101,7 +104,7 @@ SHEETS.shots_archive = SHEETS.shots.slice();
  * "that phone is pointed at an older deployment" is otherwise
  * invisible from the client.
  */
-var CONTRACT = 9;
+var CONTRACT = 10;
 
 /*
  * The oldest client this deployment will accept WRITES from.

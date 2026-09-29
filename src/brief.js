@@ -808,7 +808,7 @@ export const CSV_COLUMNS = [
   'hole', 'physical_nine', 'physical_hole', 'par', 'yards', 'hole_score', 'hole_sg',
   'shot', 'category', 'start_lie', 'start_dist', 'start_unit',
   'end_lie', 'end_dist', 'end_unit', 'holed', 'penalty', 'strokes',
-  'miss', 'club', 'expected_before', 'expected_after', 'sg',
+  'miss', 'club', 'expected_before', 'expected_after', 'sg', 'no_distance',
 ];
 
 /** The rows behind the CSV, kept separate so they can be tested. */
@@ -850,6 +850,7 @@ export function shotRows(rounds, baseline = 'tour') {
           expected_before: round3(expectedStrokes(shot.startLie, shot.startDist, baseline)),
           expected_after: round3(shot.holed ? 0 : expectedStrokes(shot.endLie, shot.endDist, baseline)),
           sg: round3(value),
+          no_distance: shot.noDistance ? 'yes' : '',
         });
       });
     });

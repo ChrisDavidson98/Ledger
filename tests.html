@@ -277,6 +277,23 @@ check('lag view reads the distance left from where the putt finished', () => {
   return M.lagPutts([r], { lo: 30 }).lags[0].left === 7 ? null : 'left should be 7';
 });
 
+check('leaving a shot out moves the club distance but not strokes gained', () => {
+  const holes = [150, 152, 148, 151, 149, 118].map((d) => ({ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'fairway', d), shot('fairway', d, 'green', 20, { club: '7i' }),
+    shot('green', 20, null, null, { holed: true })] }));
+  const r = roundOf(holes);
+  const before = M.clubDistances([r]).find((c) => c.club === '7i');
+  const sgBefore = M.roundTotals(r).total;
+  const d = M.clubDetail([r], '7i');
+  const flagged = d.shots.filter((e) => e.mishit);
+  if (flagged.length !== 1 || Math.round(flagged[0].travelled) !== 111) return `mishit flags: ${flagged.map((e) => e.travelled)}`;
+  flagged[0].shot.noDistance = true;
+  const after = M.clubDistances([r]).find((c) => c.club === '7i');
+  if (after.shots !== 5 || after.excluded !== 1 || !(after.avg > before.avg)) return JSON.stringify({ before: before.avg, after: after.avg });
+  if (!near(M.roundTotals(r).total, sgBefore)) return 'strokes gained moved';
+  return M.clubDetail([r], '7i').kept === 5 ? null : 'kept count wrong';
+});
+
 /* --- Editing shots ---------------------------------------------- */
 
 suite('Editing');

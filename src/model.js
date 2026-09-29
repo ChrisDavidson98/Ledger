@@ -159,14 +159,13 @@ export function roundReview(round) {
 }
 
 /**
- * How far each club actually goes, from approach shots that stayed in
- * play. Distance advanced, not carry — the same caveat as a drive,
- * though an approach is aimed at the green rather than round a corner,
- * so the two are much closer together.
+ * Every shot with a club that can say how far that club goes: tee
+ * shots and approaches from a yardage, no penalty, ball moved forward.
+ * Includes the ones the player left out, marked `excluded`, so the club
+ * screen can list them and put them back.
  */
-export function clubDistances(rounds, baseline = 'tour') {
-  const byClub = new Map();
-
+export function clubShots(rounds, baseline = 'tour') {
+  const entries = [];
   sgRounds(rounds).forEach((round) => {
     round.holes.forEach((hole) => {
       hole.shots.forEach((shot) => {
@@ -180,14 +179,73 @@ export function clubDistances(rounds, baseline = 'tour') {
         const travelled = shot.startDist - endYards;
         if (!(travelled > 0)) return;
 
-        if (!byClub.has(shot.club)) byClub.set(shot.club, { club: shot.club, distances: [] });
-        byClub.get(shot.club).distances.push(travelled);
+        entries.push({
+          club: shot.club,
+          travelled,
+          excluded: Boolean(shot.noDistance),
+          round,
+          hole,
+          shot,
+        });
       });
     });
   });
+  return entries;
+}
+
+/** Shots on a club before a short one is worth flagging as a mishit. */
+export const MISHIT_MIN_SHOTS = 6;
+/** How far under the club's middle shot counts as a likely mishit. */
+export const MISHIT_YARDS = 20;
+
+/**
+ * The shots for one club, with the likely mishits marked. The middle
+ * shot is taken over every shot, left out or not, so leaving one out
+ * never moves the bar the others are judged against.
+ */
+export function clubDetail(rounds, club, baseline = 'tour') {
+  const shots = clubShots(rounds, baseline).filter((e) => e.club === club);
+  const all = shots.map((e) => e.travelled).sort((a, b) => a - b);
+  const median = all.length
+    ? (all[Math.floor((all.length - 1) / 2)] + all[Math.ceil((all.length - 1) / 2)]) / 2
+    : null;
+  const flagOn = shots.length >= MISHIT_MIN_SHOTS;
+  shots.forEach((e) => { e.mishit = flagOn && median - e.travelled >= MISHIT_YARDS; });
+  const kept = shots.filter((e) => !e.excluded).map((e) => e.travelled);
+  const mean = (xs) => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null);
+  return {
+    club,
+    shots,
+    median,
+    kept: kept.length,
+    avgAll: mean(all),
+    avgKept: mean(kept),
+    minKept: kept.length ? Math.min(...kept) : null,
+    maxKept: kept.length ? Math.max(...kept) : null,
+  };
+}
+
+/**
+ * How far each club actually goes, from approach shots that stayed in
+ * play. Distance advanced, not carry — the same caveat as a drive,
+ * though an approach is aimed at the green rather than round a corner,
+ * so the two are much closer together.
+ */
+export function clubDistances(rounds, baseline = 'tour') {
+  const byClub = new Map();
+
+  // A shot the player left out (a flub, a thin one) still happened, so
+  // it still counts for score and strokes gained everywhere else. It
+  // only stops shaping the club's number — and so the club suggested.
+  clubShots(rounds, baseline).forEach((entry) => {
+    if (!byClub.has(entry.club)) byClub.set(entry.club, { club: entry.club, distances: [], excluded: 0 });
+    const club = byClub.get(entry.club);
+    if (entry.excluded) club.excluded += 1;
+    else club.distances.push(entry.travelled);
+  });
 
   const order = new Map(CLUBS.map((c, i) => [c, i]));
-  return [...byClub.values()].map((entry) => {
+  return [...byClub.values()].filter((entry) => entry.distances.length).map((entry) => {
     const sorted = entry.distances.slice().sort((a, b) => a - b);
     const sum = sorted.reduce((s, v) => s + v, 0);
     const at = (fraction) => sorted[Math.min(sorted.length - 1,
@@ -195,6 +253,7 @@ export function clubDistances(rounds, baseline = 'tour') {
     return {
       club: entry.club,
       shots: sorted.length,
+      excluded: entry.excluded,
       distances: sorted,
       avg: sum / sorted.length,
       shortest: sorted[0],

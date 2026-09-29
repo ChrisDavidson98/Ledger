@@ -57,8 +57,10 @@ import {
   playerSummary,
   nemesisHoles,
   clubDistances,
+  clubShots,
+  clubDetail,
+  MISHIT_YARDS,
   shortGameStats,
-  distanceHistogram,
   clubGapping,
   suggestClub,
   stepClub,
@@ -173,6 +175,7 @@ const STATE = {
   missMode: 'count',     // miss grid shaded by frequency, or by cost
   greenBand: 'all',      // distance chip on the approach green view
   lagBand: 'all',        // distance chip on the lag putting view
+  bagClub: null,         // club whose shots are open under Stats › Approach
   teeMode: 'count',      // tee map: how often, or what it costs
   teeZone: null,         // tee map side picked; null means the costliest
   repairPlan: null,      // previewed scorecard repair, before anything is written
@@ -2426,12 +2429,13 @@ function renderStatsPart(part, ctx) {
       ${renderTeeCard(teeOutcomes(rounds, bench()))}`;
   }
   if (part === 'app') {
+    if (STATE.bagClub) return renderClubScreen(rounds, STATE.bagClub);
     const cd = clubDistances(rounds, bench());
     return `${renderPartHead(part, ctx)}
       ${renderGreenCard(rounds)}
       ${trend}
       ${renderApproachCard(approachBuckets(rounds, bench()))}
-      ${renderClubCard(cd)}${renderGappingCard(cd)}`;
+      ${renderBagCard(rounds)}${renderGappingCard(cd)}`;
   }
   if (part === 'arg') {
     const s = shortGameStats(rounds, bench());
@@ -2824,62 +2828,163 @@ function renderHandicapCard(profile, { subtitle, caveat, implied } = {}) {
   </div>`;
 }
 
-/**
- * Each club's distances as a distribution, on one shared scale.
- *
- * Min and max alone say almost nothing — a club with one thin shot
- * looks identical to one that is genuinely inconsistent. The shape
- * says where the ball usually finishes and how far the tails run,
- * which is the number you actually club off.
- */
-function renderClubCard(clubs) {
-  if (!clubs.length) return '';
+/** "round|hole|shot" — enough to find one shot again after a re-render. */
+function shotRef(e) {
+  return `${e.round.id}|${e.hole.hole}|${e.shot.n}`;
+}
 
-  const floor = Math.min(...clubs.map((c) => c.shortest));
-  const ceiling = Math.max(...clubs.map((c) => c.longest));
-  const span = Math.max(ceiling - floor, 1);
-  const pos = (yards) => ((yards - floor) / span) * 100;
+/**
+ * Leave shots out of (or back into) their club's distance. `value`
+ * null flips each one. Only the flag changes: the shot, its score and
+ * its strokes gained are untouched. Saved and sent to the sheet at
+ * once, like any other edit to a finished round.
+ */
+function setNoDistance(refs, value) {
+  const byRound = new Map();
+  refs.forEach((ref) => {
+    const [roundId, holeNo, n] = ref.split('|');
+    if (!byRound.has(roundId)) byRound.set(roundId, []);
+    byRound.get(roundId).push([Number(holeNo), Number(n)]);
+  });
+  byRound.forEach((spots, roundId) => {
+    const round = store.getRound(roundId);
+    if (!round || round.player !== STATE.player) return;
+    spots.forEach(([holeNo, n]) => {
+      const hole = round.holes.find((h) => h.hole === holeNo);
+      const shot = hole && hole.shots.find((s) => s.n === n);
+      if (!shot) return;
+      const next = value == null ? !shot.noDistance : value;
+      if (next) shot.noDistance = true;
+      else delete shot.noDistance;
+    });
+    store.saveRound(round);
+  });
+  render();
+  sync.syncInBackground(null, { force: true });
+}
+
+/**
+ * The bag: one row per club on a shared yardage line, the bar running
+ * from the shortest to the longest shot that counts, a tick at the
+ * average. Tap a row for that club's shots.
+ */
+function renderBagCard(rounds) {
+  const clubs = clubDistances(rounds, bench());
+  // A club whose every shot is left out has no distance, but must still
+  // be reachable so the shots can be put back.
+  const allOut = [...new Set(clubShots(rounds, bench()).map((e) => e.club))]
+    .filter((c) => !clubs.some((k) => k.club === c));
+  if (!clubs.length && !allOut.length) return '';
+
+  const lo = Math.floor((Math.min(...clubs.map((c) => c.shortest), 200) - 5) / 10) * 10;
+  const hi = Math.ceil((Math.max(...clubs.map((c) => c.longest), 100) + 5) / 10) * 10;
+  const x = (y) => ((y - lo) / (hi - lo)) * 100;
+  const ticks = [];
+  for (let y = Math.ceil(lo / 50) * 50; y <= hi; y += 50) ticks.push(y);
+
+  const row = (c) => `<button class="row bag-row" data-action="open-bag-club" data-club-name="${esc(c.club)}"
+      aria-label="${esc(c.club)}, averages ${Math.round(c.avg)} yards over ${c.shots} shots" style="${thinStyle(c.shots)}">
+      <div class="bag-name mono">${esc(c.club)}</div>
+      <div class="bag-track">
+        <div class="bag-range" style="left:${x(c.shortest).toFixed(1)}%;width:${Math.max(x(c.longest) - x(c.shortest), 1).toFixed(1)}%"></div>
+        <div class="bag-tick" style="left:${x(c.avg).toFixed(1)}%"></div>
+      </div>
+      <div class="bag-end">
+        ${c.excluded ? `<span class="bag-out mono">${c.excluded} OUT</span>` : ''}
+        <strong class="mono">${Math.round(c.avg)}</strong>
+        <span class="bag-chev">&rsaquo;</span>
+      </div>
+    </button>`;
 
   return `<div class="card">
     <h2>Your clubs</h2>
-    <p class="muted">Where each club actually finishes. Taller means more shots landed there; the band is the middle half, and the line is your typical.</p>
-
-    ${clubs.map((c) => {
-      const { bins, peak } = distanceHistogram(c.distances, 5);
-      const bandLeft = pos(c.lowerQuartile);
-      const bandWidth = Math.max(pos(c.upperQuartile) - bandLeft, 1);
-
-      return `<div class="row" style="${thinStyle(c.shots)};align-items:flex-start">
-        <div class="badge" style="font-size:12px;margin-top:6px">${esc(c.club)}</div>
-        <div class="row-meta">
-          <div class="split">
-            <span class="rname">${Math.round(c.typical)}y typical${thinMark(c.shots)}</span>
-            <span class="tiny mono">${Math.round(c.lowerQuartile)}&ndash;${Math.round(c.upperQuartile)}y &middot; ${c.shots}</span>
-          </div>
-          <div style="position:relative;height:26px;margin-top:3px">
-            <div style="position:absolute;left:${bandLeft}%;width:${bandWidth}%;top:0;bottom:5px;
-                        background:var(--green-line);opacity:0.35;border-radius:3px"></div>
-            ${bins.filter((b) => b.count).map((b) => {
-              const left = pos(b.from);
-              const width = Math.max(pos(b.to) - left, 2);
-              const height = Math.max((b.count / peak) * 20, 4);
-              return `<div title="${b.from}-${b.to}y: ${b.count} shots"
-                style="position:absolute;left:${left}%;width:${width}%;bottom:5px;height:${height}px;
-                       background:var(--green-mid);border-radius:2px 2px 0 0;opacity:${(0.45 + (b.count / peak) * 0.55).toFixed(2)}"></div>`;
-            }).join('')}
-            <div style="position:absolute;left:calc(${pos(c.typical)}% - 1px);top:0;bottom:3px;width:2px;background:var(--flag)"></div>
-            <div style="position:absolute;left:0;right:0;bottom:4px;height:1px;background:var(--green-line);opacity:0.6"></div>
-          </div>
-        </div>
-      </div>`;
-    }).join('')}
-
-    <div class="split tiny" style="margin-top:4px;padding:0 2px">
-      <span>${Math.round(floor)}y</span>
-      <span>${Math.round(floor + span / 2)}y</span>
-      <span>${Math.round(ceiling)}y</span>
+    <p class="muted">How far each club goes, from the shots that count. Tap a club to see every shot and leave out the flubs.</p>
+    <div class="bag-axis mono">
+      <div class="bag-name"></div>
+      <div class="bag-track">${ticks.map((y) => `<span style="left:${x(y).toFixed(1)}%">${y}</span>`).join('')}</div>
+      <div class="bag-end">AVG</div>
     </div>
-    <p class="tiny" style="margin-top:8px">All clubs share one scale, so the rows line up against each other. The figures on the right are the middle half of your shots. Typical is the middle shot rather than the average &mdash; one thinned 7-iron should not shorten the club.</p>
+    ${clubs.map(row).join('')}
+    ${allOut.map((c) => `<button class="row bag-row" data-action="open-bag-club" data-club-name="${esc(c)}">
+      <div class="bag-name mono">${esc(c)}</div><div class="bag-track"></div>
+      <div class="bag-end"><span class="bag-out mono">ALL OUT</span><span class="bag-chev">&rsaquo;</span></div></button>`).join('')}
+    <p class="tiny mono" style="margin-top:8px">BAR = SHORTEST TO LONGEST COUNTED &middot; TICK = AVERAGE</p>
+    <p class="tiny" style="margin-top:4px">Distance is how far the ball went forward, not carry. Faded clubs have under ${THIN_SAMPLE} shots.</p>
+  </div>`;
+}
+
+/** One club: every shot on a yardage strip, with the flubs to leave out. */
+function renderClubScreen(rounds, club) {
+  const d = clubDetail(rounds, club, bench());
+  const back = `<button class="link-btn mono" data-action="close-bag-club" style="min-height:44px;padding:0">&lsaquo; ALL CLUBS</button>`;
+  if (!d.shots.length) {
+    return `<div class="card" style="border-top:none">${back}<p class="muted">No shots with ${esc(club)} yet.</p></div>`;
+  }
+
+  const delta = d.avgKept != null ? Math.round(d.avgKept) - Math.round(d.avgAll) : 0;
+  const values = d.shots.map((e) => e.travelled);
+  const lo = Math.floor((Math.min(...values) - 5) / 10) * 10;
+  const hi = Math.ceil((Math.max(...values) + 5) / 10) * 10;
+  const W = 340;
+  const x = (y) => 10 + ((y - lo) / Math.max(hi - lo, 1)) * (W - 20);
+  const step = hi - lo > 80 ? 40 : 20;
+  const ticks = [];
+  for (let y = Math.ceil(lo / step) * step; y <= hi; y += step) ticks.push(y);
+
+  const ordered = d.shots.slice().sort((a, b) =>
+    (new Date(b.round.date) - new Date(a.round.date)) || (a.hole.hole - b.hole.hole));
+  const dots = ordered.map((e, i) => {
+    const cy = 16 + (i % 3) * 10;
+    return e.excluded
+      ? `<circle cx="${x(e.travelled).toFixed(1)}" cy="${cy}" r="4.5" fill="none" stroke="var(--text-3)" stroke-width="1.5"/>`
+      : `<circle cx="${x(e.travelled).toFixed(1)}" cy="${cy}" r="5" fill="${e.mishit ? 'var(--loss)' : 'var(--text)'}"/>`;
+  }).join('');
+
+  const pending = ordered.filter((e) => e.mishit && !e.excluded);
+  const yds = (v) => Math.round(v);
+
+  return `<div class="card" style="border-top:none;padding-top:6px">
+    ${back}
+    <div class="split" style="align-items:flex-end;margin-top:4px">
+      <div>
+        <h2 style="margin:0">${esc(club)}</h2>
+        <div class="eyebrow">${d.kept} of ${d.shots.length} shots count</div>
+      </div>
+      <div style="text-align:right">
+        <div class="mono" style="font-size:38px;font-weight:600;line-height:1">${d.avgKept != null ? yds(d.avgKept) : '&ndash;'}</div>
+        <div class="eyebrow ${delta ? 'sg-pos' : ''}">${delta ? `${delta > 0 ? '+' : '&minus;'}${Math.abs(delta)} yds &middot; cleaned up` : 'average yards'}</div>
+      </div>
+    </div>
+    <svg class="club-strip" viewBox="0 0 ${W} 66" role="img"
+         aria-label="${d.kept} counted shots from ${d.minKept != null ? yds(d.minKept) : '–'} to ${d.maxKept != null ? yds(d.maxKept) : '–'} yards">
+      <rect x="0.5" y="0.5" width="${W - 1}" height="65" rx="9" fill="var(--surface)" stroke="var(--rule-soft)"/>
+      ${d.avgKept != null ? `
+        <rect x="${x(d.minKept).toFixed(1)}" y="7" width="${Math.max(x(d.maxKept) - x(d.minKept), 2).toFixed(1)}" height="38" rx="6" fill="var(--gain)" fill-opacity="0.14"/>
+        <line x1="${x(d.avgKept).toFixed(1)}" x2="${x(d.avgKept).toFixed(1)}" y1="5" y2="47" stroke="var(--gain)" stroke-width="2"/>` : ''}
+      ${dots}
+      ${ticks.map((y) => `<text x="${x(y).toFixed(1)}" y="60" text-anchor="middle" class="green-label" fill="var(--text-3)" style="font-size:10px">${y}</text>`).join('')}
+    </svg>
+    <div class="split tiny mono" style="margin-top:4px">
+      <span>&#9679; COUNTS &middot; &#9675; LEFT OUT</span>
+      <span>${d.minKept != null ? `PLAYS ${yds(d.minKept)}&ndash;${yds(d.maxKept)}` : ''}</span>
+    </div>
+    ${pending.length ? `
+      <div class="mishit-banner">
+        <p>${pending.length} shot${pending.length === 1 ? ' looks' : 's look'} like a mishit: ${pending.map((e) => yds(e.travelled)).join(', ')} yds, ${MISHIT_YARDS}+ under your usual ${esc(club)}. Leave ${pending.length === 1 ? 'it' : 'them'} out of your yardage?</p>
+        <button class="btn-primary mishit-btn" data-action="leave-out-mishits" data-shot-refs="${esc(pending.map(shotRef).join(','))}">Leave ${pending.length === 1 ? 'it' : 'them'} out</button>
+      </div>` : ''}
+    <div class="split eyebrow" style="margin:16px 0 2px"><span>Every ${esc(club)}</span><span>Tap to leave out</span></div>
+    ${ordered.map((e) => `
+      <button class="row club-shot ${e.excluded ? 'is-out' : ''}" data-action="toggle-club-shot" data-shot-ref="${esc(shotRef(e))}"
+              aria-pressed="${e.excluded}">
+        <div class="club-carry mono ${e.mishit && !e.excluded ? 'sg-neg' : ''}">${yds(e.travelled)}</div>
+        <div class="row-meta">
+          <div class="rname">${esc(e.round.courseName)} &middot; #${e.hole.hole}</div>
+          <div class="rsub">${esc(fmtShortDate(e.round.date))}${e.mishit && !e.excluded ? ' &middot; <span class="sg-neg mono">LOOKS LIKE A MISHIT</span>' : ''}</div>
+        </div>
+        <span class="club-pill mono">${e.excluded ? 'LEFT OUT' : 'COUNTS'}</span>
+      </button>`).join('')}
+    <p class="tiny" style="margin-top:10px">Shots you leave out still count in your score and strokes gained. They only stop shaping this club's yardage and the club Ledger suggests.</p>
   </div>`;
 }
 
@@ -5445,6 +5550,7 @@ const ACTIONS = {
   'toggle-admin': () => { STATE.adminOpen = !STATE.adminOpen; render(); },
   'stats-tab': (el) => {
     STATE.statsTab = el.getAttribute('data-tab');
+    STATE.bagClub = null;
     if (STATE.screen === 'stats') { render(); window.scrollTo(0, 0); } else go('stats');
   },
   'club-view': (el) => { STATE.clubView = el.getAttribute('data-view'); render(); },
@@ -5471,6 +5577,21 @@ const ACTIONS = {
   'end-round': () => {
     if (!confirm('End the round here and save it?')) return;
     finishRound();
+  },
+  'open-bag-club': (el) => {
+    STATE.bagClub = el.getAttribute('data-club-name');
+    render();
+    window.scrollTo(0, 0);
+  },
+  'close-bag-club': () => {
+    STATE.bagClub = null;
+    render();
+  },
+  'toggle-club-shot': (el) => {
+    setNoDistance([el.getAttribute('data-shot-ref')], null);
+  },
+  'leave-out-mishits': (el) => {
+    setNoDistance(el.getAttribute('data-shot-refs').split(','), true);
   },
   'toggle-drill': (el) => {
     const key = el.getAttribute('data-key');

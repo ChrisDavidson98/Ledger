@@ -1193,3 +1193,28 @@ button.stand-row {
 
 /* --- Lag putting --------------------------------------------------- */
 .lag-map { display: block; width: 100%; max-width: 360px; height: auto; margin: 8px auto 4px; }
+
+/* --- Your clubs ---------------------------------------------------- */
+.bag-row, .bag-axis { display: flex; align-items: center; gap: 10px; width: 100%; }
+.bag-row { min-height: 44px; padding: 0; background: none; border: 0; border-bottom: 1px solid var(--rule-soft); color: var(--text); cursor: pointer; text-align: left; }
+.bag-axis { font-size: 9px; color: var(--text-2); margin: 6px 0 2px; }
+.bag-name { width: 40px; flex: 0 0 40px; font-size: 13px; font-weight: 600; }
+.bag-track { position: relative; flex: 1 1 auto; height: 20px; }
+.bag-axis .bag-track { height: 12px; }
+.bag-axis .bag-track span { position: absolute; top: 0; transform: translateX(-50%); }
+.bag-range { position: absolute; top: 7px; height: 6px; border-radius: 3px; background: var(--control); }
+.bag-tick { position: absolute; top: 3px; width: 2px; height: 14px; margin-left: -1px; background: var(--text); }
+.bag-end { flex: 0 0 86px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 9px; }
+.bag-end strong { font-size: 14px; }
+.bag-out { font-size: 9px; font-weight: 600; padding: 2px 5px; border-radius: 4px; background: var(--rule-soft); color: var(--text-2); }
+.bag-chev { color: var(--text-2); font-size: 13px; }
+.club-strip { display: block; width: 100%; height: auto; margin-top: 14px; }
+.mishit-banner { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: var(--loss-wash); border: 1px solid color-mix(in srgb, var(--loss) 40%, transparent); }
+.mishit-banner p { margin: 0 0 10px; font-size: 14px; line-height: 1.4; }
+.mishit-btn { width: 100%; min-height: 44px; background: var(--loss); color: var(--primary-ink); }
+.club-shot { min-height: 48px; width: 100%; padding: 0; background: none; border: 0; border-bottom: 1px solid var(--rule-soft); color: var(--text); cursor: pointer; text-align: left; }
+.club-carry { width: 44px; flex: 0 0 44px; font-size: 15px; font-weight: 600; }
+.club-pill { font-size: 10px; font-weight: 600; padding: 4px 8px; border-radius: 6px; background: var(--gain); color: var(--primary-ink); }
+.club-shot.is-out .club-carry { color: var(--text-3); text-decoration: line-through; }
+.club-shot.is-out .rname { color: var(--text-3); }
+.club-shot.is-out .club-pill { background: none; color: var(--text-2); border: 1px solid var(--control); }

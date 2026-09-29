@@ -32,7 +32,7 @@ const LAST_PULL_KEY = 'ledger:last_pull';
  * changes, and raise MIN_CLIENT in Code.gs when an older shape stops
  * being safe to accept.
  */
-export const CLIENT_CONTRACT = 9;
+export const CLIENT_CONTRACT = 10;
 
 /* --- Config ------------------------------------------------------ */
 
@@ -395,6 +395,7 @@ export function flattenRound(round) {
         miss: shot.miss || '',
         category,
         sg: round2(sg),
+        no_distance: shot.noDistance ? 'yes' : '',
       });
     });
   });
@@ -450,6 +451,7 @@ export function rebuildRound(summaryRow, shotRows) {
         penalty: Number(row.penalty) || 0,
         club: row.club ? String(row.club) : null,
         miss: row.miss ? String(row.miss) : null,
+        ...(String(row.no_distance).toLowerCase() === 'yes' ? { noDistance: true } : {}),
       });
       if (holed) hole.done = true;
     });
