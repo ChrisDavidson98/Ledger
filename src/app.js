@@ -247,6 +247,31 @@ function sgClass(v) {
   return 'sg-zero';
 }
 
+/*
+ * What a strokes-gained figure means, in a word, so nobody has to know
+ * that −0.04 is fine. Thresholds depend on what the number covers: a
+ * tenth of a shot is nothing over a round and a lot on one swing.
+ */
+const SG_SCALE = {
+  shot: { near: 0.05, small: 0.15 },
+  hole: { near: 0.05, small: 0.2 },
+  round: { near: 0.5, small: 2 },
+};
+
+function sgVerdict(v, per = 'shot') {
+  const { near, small } = SG_SCALE[per];
+  if (v > near) return { word: 'gaining', cls: 'sg-pos' };
+  if (v >= -near) return { word: 'about even', cls: 'sg-zero' };
+  if (v >= -small) return { word: 'a little behind', cls: 'sg-neg' };
+  return { word: 'costing strokes', cls: 'sg-neg' };
+}
+
+/** A right-hand row value: the SG figure with its word underneath. */
+function sgValue(v, per = 'shot', style = '') {
+  const { word, cls } = sgVerdict(v, per);
+  return `<div class="row-val ${cls}" style="text-align:right;${style}">${fmtSG(v)}<div class="sg-word">${word}</div></div>`;
+}
+
 function fmtToPar(diff) {
   if (diff === 0) return 'E';
   return diff > 0 ? '+' + diff : '−' + Math.abs(diff);
@@ -2342,7 +2367,8 @@ function renderPartHead(part, ctx) {
       </div>
       <div style="text-align:right">
         <div class="eyebrow">SG / 18</div>
-        <div class="mono ${sgClass(avg[part])}" style="font-size:20px;font-weight:600">${fmtSG(avg[part])}</div>
+        <div class="mono ${sgVerdict(avg[part], 'round').cls}" style="font-size:20px;font-weight:600">${fmtSG(avg[part])}</div>
+        <div class="sg-word ${sgVerdict(avg[part], 'round').cls}">${sgVerdict(avg[part], 'round').word}</div>
         ${upside >= 0.1 ? `<div class="eyebrow" style="font-size:9.5px">Worth ~${upside.toFixed(1)} a round</div>` : ''}
       </div>
     </div>
@@ -2418,7 +2444,7 @@ function renderStatsOverview(ctx) {
           const good = row.handicap <= game.profile.overall + 0.5;
           return `<button class="row" data-action="stats-tab" data-tab="${row.category}" style="min-height:44px;padding:10px 0">
             <div class="row-meta"><div class="rname" style="font-weight:500">${esc(CATEGORY_LABELS[row.category])}</div></div>
-            <div class="row-val ${sgClass(avg[row.category])}" style="width:64px;text-align:right">${fmtSG(avg[row.category])}</div>
+            ${sgValue(avg[row.category], 'round', 'width:96px')}
             <div class="row-val ${good ? 'sg-pos' : 'sg-neg'}" style="width:40px;text-align:right">${row.handicap <= 0.5 ? 'scr' : esc(fmtHandicapShort(row.handicap))}</div>
             <div class="row-val" style="width:14px;text-align:right">&rsaquo;</div>
           </button>`;
@@ -2634,9 +2660,9 @@ function renderTeeCard(tee) {
           <div class="rname">${LIE_LABELS[row.lie] || esc(row.lie)}${thinMark(row.count)}</div>
           <div class="rsub">${row.count} of ${tee.total} tee shots</div>
         </div>
-        <div class="row-val ${sgClass(row.sg / row.count)}">${fmtSG(row.sg / row.count)}</div>`,
+        ${sgValue(row.sg / row.count)}`,
       thinStyle(row.count), row.detail, shotPath)).join('')}
-    <p class="tiny" style="margin-top:8px">Per-shot average. A miss that costs little is not the miss to fix.</p>
+    <p class="tiny" style="margin-top:8px">Strokes gained per shot vs ${esc(benchName())}. A miss that costs little is not the miss to fix.</p>
   </div>`;
 }
 
@@ -2660,7 +2686,7 @@ function renderPuttingCard(putts) {
           <div class="rname">Made ${b.holed} of ${b.holes} first putt${b.holes === 1 ? '' : 's'} (${Math.round((b.holed / b.holes) * 100)}%)${thinMark(b.holes)}</div>
           <div class="rsub">${(b.putts / b.holes).toFixed(1)} putts a hole${b.threePutts ? ` &middot; ${b.threePutts} three-putt${b.threePutts === 1 ? '' : 's'}` : ''}</div>
         </div>
-        <div class="row-val ${sgClass(b.sg / b.holes)}">${fmtSG(b.sg / b.holes)}</div>`,
+        ${sgValue(b.sg / b.holes, 'hole')}`,
       thinStyle(b.holes), b.detail,
       (s) => `${fmtDist(s.startDist, s.startUnit)} &rarr; ${s.holed ? '<strong>holed</strong>' : `missed, ${fmtDist(s.endDist, s.endUnit)} left`}`)).join('')}
   </div>`;
@@ -2956,10 +2982,10 @@ function renderApproachCard(buckets) {
         <div class="row-meta">
           <div class="rname">${b.shots} shot${b.shots === 1 ? '' : 's'}${thinMark(b.shots)}</div>
           <div class="rsub">${b.proximityCount
-            ? 'Avg ' + Math.round(b.proximitySum / b.proximityCount) + 'ft when on'
+            ? `Found the green ${b.proximityCount} of ${b.shots}, ${Math.round(b.proximitySum / b.proximityCount)}ft away on average`
             : 'never finished on the green'}</div>
         </div>
-        <div class="row-val ${sgClass(b.sg / b.shots)}">${fmtSG(b.sg / b.shots)}</div>`,
+        ${sgValue(b.sg / b.shots)}`,
       thinStyle(b.shots), b.detail, shotPath)).join('')}
     <p class="tiny" style="margin-top:8px">Bars and figures are the per-shot average, with the number of shots under each band. The bucket costing most per swing is where practice pays${
       thin ? `, but ${thin === 1 ? 'the faded row has' : 'faded rows have'} under ${THIN_SAMPLE} shots &mdash; not enough to trust yet` : ''

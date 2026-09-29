@@ -436,6 +436,8 @@ label {
 .sg-pos { color: var(--gain); }
 .sg-neg { color: var(--loss); }
 .sg-zero { color: var(--text-2); }
+/* The plain-English word under a strokes-gained figure: same colour, quieter. */
+.sg-word { font-family: var(--font-sans); font-size: 10.5px; font-weight: 500; opacity: 0.8; white-space: nowrap; }
 
 /* --- Stats ------------------------------------------------------ */
 
