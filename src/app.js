@@ -42,6 +42,9 @@ import {
   nextUnplayedHole,
   relinkHole,
   approachBuckets,
+  approachGreen,
+  greenVerdict,
+  GREEN_BANDS,
   puttingBuckets,
   teeOutcomes,
   greensInRegulation,
@@ -164,6 +167,7 @@ const STATE = {
   teeTimeDraft: null,    // tee time being created or edited
   viewTeeTimeId: null,
   missMode: 'count',     // miss grid shaded by frequency, or by cost
+  greenBand: 'all',      // distance chip on the approach green view
   repairPlan: null,      // previewed scorecard repair, before anything is written
   repairCourseId: null,
   rosterState: null,     // what the last roster read managed, shown at the gate
@@ -2392,8 +2396,8 @@ function renderStatsPart(part, ctx) {
   if (part === 'app') {
     const cd = clubDistances(rounds, bench());
     return `${headline}
+      ${renderGreenCard(rounds)}
       ${renderApproachCard(approachBuckets(rounds, bench()))}
-      ${renderMissCard('Approach misses', missTally(rounds, 'app', bench()))}
       ${renderClubCard(cd)}${renderGappingCard(cd)}`;
   }
   if (part === 'arg') {
@@ -3045,6 +3049,121 @@ function renderBestsCard(bests, allRounds) {
         </div>
         <div class="row-val" style="font-size:17px;color:var(--green-mid)">${value}</div>
       </div>`).join('')}
+  </div>`;
+}
+
+/*
+ * Where each miss direction sits around the green, in degrees with
+ * y pointing down the screen: short is below the green, long above.
+ */
+const GREEN_ANGLES = {
+  right: 0, 'short-right': 45, short: 90, 'short-left': 135,
+  left: 180, 'long-left': 225, long: 270, 'long-right': 315,
+};
+
+/** A small repeatable random source, so dots hold still between renders. */
+function seededRandom(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Below this many approaches, the green is drawn but not read aloud. */
+const GREEN_MIN_SHOTS = 8;
+
+/**
+ * Approaches as a picture: a green seen from above with one ball for
+ * every 1% of shots, on the green or in the direction they missed.
+ * The point is that nobody needs telling how to read it — balls short
+ * of the green are shots that came up short.
+ */
+function renderGreenCard(rounds) {
+  const band = GREEN_BANDS.find((b) => b.key === STATE.greenBand) || GREEN_BANDS[0];
+  const g = approachGreen(rounds, bench(), band);
+  const all = band.key === 'all' ? g : approachGreen(rounds, bench());
+  if (!all.total) return '';
+
+  const verdict = greenVerdict(g);
+  const thin = g.total < GREEN_MIN_SHOTS;
+  const pct = (n) => (g.total ? Math.round((n / g.total) * 100) : 0);
+
+  const W = 460;
+  const H = 270;
+  const cx = W / 2;
+  const cy = H / 2;
+  const rx = 80;
+  const ry = 58;
+
+  // The miss sector that happens most is the one drawn in the flag colour.
+  const worstDir = Object.keys(g.byDir).sort((a, b) => g.byDir[b] - g.byDir[a])[0];
+
+  const dots = [];
+  const rand = seededRandom(band.lo * 7 + 11);
+  for (let i = 0; i < pct(g.onGreen); i++) {
+    const a = rand() * Math.PI * 2;
+    const r = Math.sqrt(rand()) * 0.82;
+    dots.push(`<circle cx="${(cx + Math.cos(a) * r * rx).toFixed(1)}" cy="${(cy + Math.sin(a) * r * ry).toFixed(1)}" r="4.2" fill="var(--gain)"/>`);
+  }
+  const labels = [];
+  Object.entries(GREEN_ANGLES).forEach(([dir, deg], k) => {
+    const n = pct(g.byDir[dir] || 0);
+    const dirRand = seededRandom(band.lo * 7 + k * 101 + 3);
+    const colour = dir === worstDir ? 'var(--loss)' : 'var(--text-3)';
+    for (let i = 0; i < n; i++) {
+      const a = ((deg + (dirRand() - 0.5) * 34) * Math.PI) / 180;
+      const t = 1.22 + dirRand() * 0.5;
+      dots.push(`<circle cx="${(cx + Math.cos(a) * t * rx).toFixed(1)}" cy="${(cy + Math.sin(a) * t * ry).toFixed(1)}" r="4.2" fill="${colour}"/>`);
+    }
+    if (n) {
+      const rad = (deg * Math.PI) / 180;
+      // Labels sit outside the ring of balls and read away from the
+      // green, so a busy sector never prints over its own dots.
+      const side = Math.abs(Math.cos(rad)) > 0.3;
+      const lx = cx + Math.cos(rad) * (side ? 1.9 : 0) * rx;
+      const ly = cy + Math.sin(rad) * 2.02 * ry + 4;
+      const anchor = Math.cos(rad) > 0.3 ? 'start' : Math.cos(rad) < -0.3 ? 'end' : 'middle';
+      labels.push(`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" class="green-label" fill="${dir === worstDir ? 'var(--loss)' : 'var(--text-2)'}">${esc(MISS_LABELS[dir].toUpperCase())} ${n}%</text>`);
+    }
+  });
+
+  return `<div class="card">
+    <h2>Where approaches finish</h2>
+    <p class="muted">Each ball is 1% of your approaches from 30 yards and out. Green balls found the green.</p>
+    <div class="chip-grid green-chips">
+      ${GREEN_BANDS.map((b) => `<button class="chip ${b.key === band.key ? 'active' : ''}" data-green-band="${b.key}"
+          aria-pressed="${b.key === band.key}">${b.label}</button>`).join('')}
+    </div>
+    ${g.total ? `
+      <svg class="green-map" viewBox="0 0 ${W} ${H}" role="img" style="${thin ? 'opacity:0.55' : ''}"
+           aria-label="${pct(g.onGreen)}% on the green, ${pct(g.shortCount)}% short, ${pct(g.longCount)}% long, ${pct(g.leftCount)}% left, ${pct(g.rightCount)}% right">
+        <ellipse cx="${cx}" cy="${cy}" rx="${rx + 9}" ry="${ry + 8}" fill="none" stroke="var(--gain)" stroke-opacity="0.35" stroke-dasharray="3 4"/>
+        <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="var(--gain)" fill-opacity="0.13" stroke="var(--gain)" stroke-opacity="0.6"/>
+        <line x1="${cx + 6}" y1="${cy - 4}" x2="${cx + 6}" y2="${cy - 30}" stroke="var(--text)" stroke-width="1.4"/>
+        <path d="M${cx + 6} ${cy - 30} l14 5 l-14 5 z" fill="var(--loss)"/>
+        <circle cx="${cx + 6}" cy="${cy - 3}" r="2.6" fill="var(--text)"/>
+        ${dots.join('')}
+        ${labels.join('')}
+      </svg>
+      <div class="green-read">
+        <div class="green-stat"><strong class="mono">${pct(g.onGreen)}%</strong><span>on the green</span></div>
+        <div class="green-stat"><strong class="mono">${g.total}</strong><span>approach${g.total === 1 ? '' : 'es'}</span></div>
+      </div>
+      ${thin
+        ? `<p class="tiny"><span class="thin-tag">LOW SAMPLE</span> Only ${g.total} approach${g.total === 1 ? '' : 'es'} from here &mdash; not enough to read a pattern yet.</p>`
+        : `<h3 class="green-headline">${esc(verdict.headline)}</h3>
+           <p style="margin:2px 0 6px">${esc(verdict.body)}</p>
+           <p class="eyebrow" style="margin:0">${esc(verdict.line)}</p>`}
+      ${g.other ? `<p class="tiny" style="margin-top:6px">${pct(g.other)}% missed the green with no direction logged, so they are not drawn.</p>` : ''}`
+      : '<p class="muted">No approaches from this distance yet.</p>'}
+    <details class="more-numbers">
+      <summary>Show the numbers</summary>
+      ${renderMissCard('Approach misses', missTally(rounds, 'app', bench()))}
+    </details>
   </div>`;
 }
 
@@ -5413,7 +5532,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-dist-step],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-bag-club],[data-miss-inline],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-smooth],[data-hcp-window],[data-repair-course]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-dist-step],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-bag-club],[data-miss-inline],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-green-band],[data-smooth],[data-hcp-window],[data-repair-course]');
   if (!target) return;
 
   const benchmark = target.getAttribute('data-benchmark');
@@ -5424,6 +5543,9 @@ function onClick(event) {
 
   const missMode = target.getAttribute('data-miss-mode');
   if (missMode) { STATE.missMode = missMode; return render(); }
+
+  const greenBand = target.getAttribute('data-green-band');
+  if (greenBand) { STATE.greenBand = greenBand; return render(); }
 
   const repairCourse = target.getAttribute('data-repair-course');
   if (repairCourse !== null) {

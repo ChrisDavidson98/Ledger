@@ -217,6 +217,29 @@ check('a three-putt is charged to the band of its first putt', () => {
   return near(b.sg, M.roundTotals(r).putt) ? null : `band ${b.sg.toFixed(3)} vs putting ${M.roundTotals(r).putt.toFixed(3)}`;
 });
 
+check('green view counts a front-edge "short" as a green hit', () => {
+  const r = roundOf([
+    { par: 4, yards: 400, shots: [shot('tee', 400, 'fairway', 150),
+      shot('fairway', 150, 'green', 40, { miss: 'short' })] },
+    { par: 4, yards: 400, shots: [shot('tee', 400, 'fairway', 150),
+      shot('fairway', 150, 'rough', 20, { miss: 'short-left' })] },
+    { par: 4, yards: 400, shots: [shot('tee', 400, 'fairway', 150),
+      shot('fairway', 150, 'rough', 20)] },
+  ]);
+  const g = M.approachGreen([r]);
+  if (g.total !== 3 || g.onGreen !== 1 || g.other !== 1) return JSON.stringify(g);
+  if (g.shortCount !== 1 || g.leftCount !== 1) return JSON.stringify(g);
+  return M.approachGreen([r], 'tour', { lo: 50, hi: 100 }).total === 0 ? null : 'band filter let a 150y shot through';
+});
+
+check('green verdict: short twice as often as long is a one-way miss', () => {
+  const v = M.greenVerdict({ total: 20, onGreen: 8, shortCount: 8, longCount: 3, leftCount: 2, rightCount: 2, byDir: {} });
+  if (v.headline !== 'A one-way miss.' || !v.body.includes('Take one more')) return v.headline + ' ' + v.body;
+  const spread = M.greenVerdict({ total: 20, onGreen: 8, shortCount: 5, longCount: 4, leftCount: 1, rightCount: 5, byDir: {} });
+  if (spread.headline !== 'A spread miss.') return spread.headline;
+  return spread.line.endsWith('your line is leaking') ? null : spread.line;
+});
+
 /* --- Editing shots ---------------------------------------------- */
 
 suite('Editing');

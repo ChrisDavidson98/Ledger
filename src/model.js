@@ -1021,6 +1021,98 @@ export function missTally(rounds, category, baseline = 'tour') {
   };
 }
 
+/** Distance chips for the green view, in yards. */
+export const GREEN_BANDS = [
+  { key: 'all', label: 'All', lo: 0, hi: Infinity },
+  { key: '50', label: '50–100', lo: 50, hi: 100 },
+  { key: '100', label: '100–150', lo: 100, hi: 150 },
+  { key: '150', label: '150–200', lo: 150, hi: 200 },
+  { key: '200', label: '200+', lo: 200, hi: Infinity },
+];
+
+/**
+ * Where approaches finished around the green, for drawing it.
+ *
+ * "On the green" is read from where the ball ended up, not from the
+ * miss button, so a ball that was logged short but still found the
+ * front edge counts as a green hit. A ball off the green goes in the
+ * sector its miss direction names; one off the green with no direction
+ * (or logged as on target) is `other` — listed, not placed.
+ */
+export function approachGreen(rounds, baseline = 'tour', { lo = 0, hi = Infinity } = {}) {
+  const byDir = {};
+  let total = 0;
+  let onGreen = 0;
+  let other = 0;
+
+  rounds.forEach((round) => {
+    round.holes.forEach((hole) => {
+      hole.shots.forEach((shot) => {
+        if (shotSG(shot, hole.par, baseline).category !== 'app') return;
+        if (!(shot.startDist >= lo && shot.startDist < hi)) return;
+        total += 1;
+        if (shot.holed || shot.endLie === 'green') {
+          onGreen += 1;
+        } else if (shot.miss && shot.miss !== 'target') {
+          byDir[shot.miss] = (byDir[shot.miss] || 0) + 1;
+        } else {
+          other += 1;
+        }
+      });
+    });
+  });
+
+  const sum = (dirs) => dirs.reduce((s, d) => s + (byDir[d] || 0), 0);
+  return {
+    total,
+    onGreen,
+    other,
+    byDir,
+    shortCount: sum(['short', 'short-left', 'short-right']),
+    longCount: sum(['long', 'long-left', 'long-right']),
+    leftCount: sum(['left', 'short-left', 'long-left']),
+    rightCount: sum(['right', 'short-right', 'long-right']),
+  };
+}
+
+/**
+ * The plain-English read of an approachGreen result, following the
+ * tee screen's logic: a miss that goes one way is a club or an aim to
+ * change, one that goes both ways is the strike.
+ */
+export function greenVerdict(g) {
+  if (!g.total) return null;
+  const pct = (n) => Math.round((n / g.total) * 100);
+  const { shortCount: s, longCount: l } = g;
+  let headline;
+  let body;
+  if (s + l === 0) {
+    headline = 'No misses short or long.';
+    body = 'Every miss logged here went sideways, so distance is not the problem.';
+  } else if (s >= 2 * l) {
+    headline = 'A one-way miss.';
+    body = l
+      ? `Short ${(s / l).toFixed(1).replace(/\.0$/, '')}× as often as long. Missing in one direction is a club, not a swing. Take one more.`
+      : 'Every distance miss finished short. Missing in one direction is a club, not a swing. Take one more.';
+  } else if (l >= 2 * s) {
+    headline = 'A one-way miss.';
+    body = s
+      ? `Long ${(l / s).toFixed(1).replace(/\.0$/, '')}× as often as short. Missing in one direction is a club, not a swing. Take one less.`
+      : 'Every distance miss finished long. Missing in one direction is a club, not a swing. Take one less.';
+  } else {
+    headline = 'A spread miss.';
+    body = 'Short and long are close to even. That is strike quality, not club choice.';
+  }
+  const left = pct(g.leftCount);
+  const right = pct(g.rightCount);
+  return {
+    headline,
+    body,
+    greenPct: pct(g.onGreen),
+    line: `Left ${left}% · right ${right}% — ${Math.abs(left - right) <= 3 ? 'your line is fine' : 'your line is leaking'}`,
+  };
+}
+
 /**
  * Rounds played together, joined after the fact by the group id a
  * scheduled tee time stamped on them.
