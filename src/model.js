@@ -544,9 +544,15 @@ function eachShot(rounds, baseline, visit) {
 }
 
 /**
- * Putting by distance. `holed` is the make rate, which is the number
- * golfers actually recognise, and `threePutts` counts holes where
- * putting from this bucket took three or more.
+ * Putting by the distance of the first putt on each hole. Everything
+ * after it — the lag, the come-backer, a three-putt — belongs to the
+ * band it started in, so "from 30ft+" means what a golfer means by it:
+ * how the hole went once you were on the green that far away.
+ *
+ * `holes` is how many greens started in the band, `holed` how many of
+ * those first putts dropped, `putts` every putt taken on them (so the
+ * bands still sum to the round's putts) and `sg` their strokes gained.
+ * Each putt's SG is unchanged; only the band it is counted in moved.
  */
 export function puttingBuckets(rounds, baseline = 'tour') {
   const bounds = [
@@ -556,6 +562,7 @@ export function puttingBuckets(rounds, baseline = 'tour') {
     lo,
     hi,
     label: hi === Infinity ? `${lo}ft+` : `${lo}-${hi}ft`,
+    holes: 0,
     putts: 0,
     holed: 0,
     sg: 0,
@@ -569,23 +576,23 @@ export function puttingBuckets(rounds, baseline = 'tour') {
   rounds.forEach((round) => {
     round.holes.forEach((hole) => {
       const putts = hole.shots.filter((s) => s.startLie === 'green');
-      putts.forEach((shot, index) => {
-        const bucket = find(shot.startDist);
-        if (!bucket) return;
+      if (!putts.length) return;
+      const bucket = find(putts[0].startDist);
+      if (!bucket) return;
+      bucket.holes += 1;
+      bucket.firstPutts += 1;
+      if (putts[0].holed) bucket.holed += 1;
+      if (putts.length >= 3) bucket.threePutts += 1;
+      putts.forEach((shot) => {
         const { sg } = shotSG(shot, hole.par, baseline);
         bucket.putts += 1;
         bucket.sg += sg;
         bucket.detail.push({ round, hole, shot, sg });
-        if (shot.holed) bucket.holed += 1;
-        if (index === 0) {
-          bucket.firstPutts += 1;
-          if (putts.length >= 3) bucket.threePutts += 1;
-        }
       });
     });
   });
 
-  return buckets.filter((b) => b.putts > 0);
+  return buckets.filter((b) => b.holes > 0);
 }
 
 /**

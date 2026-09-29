@@ -651,17 +651,20 @@ ${table(['Distance', 'Shots', 'SG total', 'SG per shot', 'Greens hit', 'Proximit
       b.proximityCount ? `${Math.round(b.proximitySum / b.proximityCount)}ft` : '—',
     ]), ['', 'r', 'r', 'r', 'r', 'r'])}` : '';
 
-  const puttBlock = putts.length ? `## Putting by distance
+  const puttBlock = putts.length ? `## Putting by first-putt distance
 
-${table(['Distance', 'Putts', 'Holed', 'Make rate', 'SG total', 'SG per putt', '3-putts from here'],
+Each hole is counted once, in the band its first putt started from. Strokes
+gained covers every putt on that hole.
+
+${table(['First putt', 'Holes', 'Made first putt', 'Putts', 'SG total', 'SG per hole', '3-putts'],
     putts.map((b) => [
       b.label,
+      String(b.holes),
+      `${b.holed} (${pct(b.holed, b.holes)}%)`,
       String(b.putts),
-      String(b.holed),
-      `${pct(b.holed, b.putts)}%`,
       sg(b.sg),
-      sg(b.sg / b.putts),
-      `${b.threePutts} of ${b.firstPutts}`,
+      sg(b.sg / b.holes),
+      `${b.threePutts} of ${b.holes}`,
     ]), ['', 'r', 'r', 'r', 'r', 'r', 'r'])}` : '';
 
   const missBlock = ['ott', 'app'].map((category) => {

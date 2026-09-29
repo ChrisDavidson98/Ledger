@@ -2653,15 +2653,15 @@ function renderPuttingCard(putts) {
   if (!putts.length) return '';
   return `<div class="card">
     <h2>Putting</h2>
-    <p class="muted">Make rate and strokes gained by distance. Tap a row to see the putts.</p>
+    <p class="muted">Grouped by how far away your first putt was. Strokes gained is per hole, counting every putt it took. Tap a row to see the putts.</p>
     ${putts.map((b) => drillRow(`putt:${b.label}`, `
         ${rangeTag(b.label, 'ft')}
         <div class="row-meta">
-          <div class="rname">${b.putts} putt${b.putts === 1 ? '' : 's'} &middot; ${Math.round((b.holed / b.putts) * 100)}% holed${thinMark(b.putts)}</div>
-          <div class="rsub">${b.threePutts ? `${b.threePutts} three-putt${b.threePutts === 1 ? '' : 's'} from here` : 'no three-putts from here'}</div>
+          <div class="rname">Made ${b.holed} of ${b.holes} first putt${b.holes === 1 ? '' : 's'} (${Math.round((b.holed / b.holes) * 100)}%)${thinMark(b.holes)}</div>
+          <div class="rsub">${(b.putts / b.holes).toFixed(1)} putts a hole${b.threePutts ? ` &middot; ${b.threePutts} three-putt${b.threePutts === 1 ? '' : 's'}` : ''}</div>
         </div>
-        <div class="row-val ${sgClass(b.sg / b.putts)}">${fmtSG(b.sg / b.putts)}</div>`,
-      thinStyle(b.putts), b.detail,
+        <div class="row-val ${sgClass(b.sg / b.holes)}">${fmtSG(b.sg / b.holes)}</div>`,
+      thinStyle(b.holes), b.detail,
       (s) => `${fmtDist(s.startDist, s.startUnit)} &rarr; ${s.holed ? '<strong>holed</strong>' : `missed, ${fmtDist(s.endDist, s.endUnit)} left`}`)).join('')}
   </div>`;
 }

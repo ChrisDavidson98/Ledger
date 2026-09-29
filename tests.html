@@ -201,6 +201,22 @@ check('categories sum to the total', () => {
   return near(sum, t.total) ? null : `sum ${sum.toFixed(3)} vs total ${t.total.toFixed(3)}`;
 });
 
+check('a three-putt is charged to the band of its first putt', () => {
+  // 40ft lag to 8ft, miss to 2ft, hole: the 8-footer must not land in 6–10.
+  const r = roundOf([{ par: 4, yards: 400, shots: [
+    shot('tee', 400, 'fairway', 150), shot('fairway', 150, 'green', 40),
+    shot('green', 40, 'green', 8), shot('green', 8, 'green', 2),
+    shot('green', 2, null, null, { holed: true }),
+  ] }]);
+  const buckets = M.puttingBuckets([r]);
+  if (buckets.length !== 1) return `expected one band, got ${buckets.map((b) => b.label).join(', ')}`;
+  const [b] = buckets;
+  if (b.label !== '30ft+' || b.holes !== 1 || b.putts !== 3 || b.threePutts !== 1 || b.holed !== 0) {
+    return `got ${JSON.stringify({ label: b.label, holes: b.holes, putts: b.putts, threePutts: b.threePutts, holed: b.holed })}`;
+  }
+  return near(b.sg, M.roundTotals(r).putt) ? null : `band ${b.sg.toFixed(3)} vs putting ${M.roundTotals(r).putt.toFixed(3)}`;
+});
+
 /* --- Editing shots ---------------------------------------------- */
 
 suite('Editing');
