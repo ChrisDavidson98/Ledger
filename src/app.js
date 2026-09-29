@@ -202,7 +202,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-26t';
+const BUILD = '2026-09-28a';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -1689,9 +1689,28 @@ function screenDetail() {
     ${renderReteeCard(round)}`;
 }
 
-/** The layout a round was played on, found again by its label. */
+/**
+ * The layout a round was played on. By its label when the round still
+ * has one — but the sheet does not store the layout, so a round that
+ * has been through sync comes back without it. Then it is recognised
+ * from its holes: the layout whose pars and yardages, on the tees the
+ * round was played from, match hole for hole. Pars alone are the last
+ * resort, and only when exactly one layout fits.
+ */
 function roundLayout(round, course) {
-  return playOptions(course).find((o) => o.label === round.layout) || null;
+  const options = playOptions(course);
+  const named = options.find((o) => o.label === round.layout);
+  if (named) return named;
+
+  const sized = options.filter((o) => buildRoundHoles(course, o, round.teeName).length === round.holes.length);
+  const fits = (o, withYards) => buildRoundHoles(course, o, round.teeName).every((h, i) =>
+    h.par === Number(round.holes[i].par)
+    && (!withYards || Math.round(h.yards) === Math.round(Number(round.holes[i].yards))));
+
+  const exact = sized.filter((o) => fits(o, true));
+  if (exact.length) return exact[0];
+  const byPar = sized.filter((o) => fits(o, false));
+  return byPar.length === 1 ? byPar[0] : null;
 }
 
 /**
