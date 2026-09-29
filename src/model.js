@@ -627,6 +627,82 @@ export function teeOutcomes(rounds, baseline = 'tour') {
 }
 
 /**
+ * Tee shots on par 4s and 5s split into three sides — left, on target,
+ * right — for the tee map. A diagonal miss goes with its side, so
+ * short-left is a left miss; a straight short or long stays centre.
+ *
+ * A shot with no direction logged still counts as on target when it
+ * found the fairway, since that is what "Hit it" would have said.
+ * Anything else without a direction is `unlogged`: counted, not drawn.
+ * `trouble` marks shots that finished in recovery or took a penalty,
+ * so the map can put them out in the hatched strip on their side.
+ */
+export function teeSides(rounds, baseline = 'tour') {
+  const zones = {
+    left: { key: 'left', count: 0, sg: 0, shots: [] },
+    centre: { key: 'centre', count: 0, sg: 0, shots: [] },
+    right: { key: 'right', count: 0, sg: 0, shots: [] },
+  };
+  let unlogged = 0;
+
+  eachShot(rounds, baseline, (shot, hole, category, sg, round) => {
+    if (category !== 'ott') return;
+    const miss = shot.miss || (shot.endLie === 'fairway' ? 'target' : null);
+    if (!miss) { unlogged += 1; return; }
+    const side = miss.includes('left') ? 'left' : miss.includes('right') ? 'right' : 'centre';
+    const zone = zones[side];
+    zone.count += 1;
+    zone.sg += sg;
+    zone.shots.push({
+      id: `${round.id}-${hole.hole}`,
+      short: miss.startsWith('short'),
+      long: miss.startsWith('long'),
+      trouble: Boolean(shot.penalty) || shot.endLie === 'recovery',
+      endLie: shot.holed ? 'green' : shot.endLie,
+    });
+  });
+
+  const total = zones.left.count + zones.centre.count + zones.right.count;
+  return { zones, total, unlogged };
+}
+
+/**
+ * The one sentence under the tee map for the selected side, following
+ * the redesign's rules in order. `null` when the sample is too thin to
+ * say anything.
+ */
+export function teeSideVerdict(t, key, minShots = 8) {
+  const z = t.zones[key];
+  if (!z || z.count < minShots) return null;
+  const per = (s) => (s.count ? s.sg / s.count : 0);
+  const fmt = (v) => `${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(2)}`;
+
+  if (key === 'centre') {
+    return per(z) >= 0
+      ? `Find the short grass and you gain ${fmt(per(z))} a shot every time.`
+      : `Even on target you give up ${fmt(per(z))} a shot, so the gap to the misses is what matters.`;
+  }
+  const other = t.zones[key === 'left' ? 'right' : 'left'];
+  const name = key === 'left' ? 'Left' : 'Right';
+  const otherName = key === 'left' ? 'right' : 'left';
+  if (other.count >= minShots) {
+    const mine = per(z);
+    const theirs = per(other);
+    if (z.count <= 0.6 * other.count && mine < 0 && mine <= 2 * theirs && theirs < 0) {
+      const k = (mine / theirs).toFixed(1).replace(/\.0$/, '');
+      return `Half as often as your ${otherName} miss, but ${k}× the cost per shot. ${name} is the miss to take off the course.`;
+    }
+    if (z.count > other.count && Math.abs(mine) < Math.abs(theirs) / 2) {
+      return 'Your most common miss, and a cheap one. It mostly stays playable.';
+    }
+    if (z.count > other.count) {
+      return `Your most common miss, costing ${fmt(mine)} a shot.`;
+    }
+  }
+  return `${z.count} tee shots missed ${key}, at ${fmt(per(z))} a shot.`;
+}
+
+/**
  * Greens in regulation: on the putting surface in par minus two —
  * a par 3 in one, a par 4 in two, a par 5 in three.
  *

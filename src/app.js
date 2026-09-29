@@ -44,6 +44,8 @@ import {
   approachBuckets,
   approachGreen,
   greenVerdict,
+  teeSides,
+  teeSideVerdict,
   GREEN_BANDS,
   puttingBuckets,
   teeOutcomes,
@@ -168,6 +170,8 @@ const STATE = {
   viewTeeTimeId: null,
   missMode: 'count',     // miss grid shaded by frequency, or by cost
   greenBand: 'all',      // distance chip on the approach green view
+  teeMode: 'count',      // tee map: how often, or what it costs
+  teeZone: null,         // tee map side picked; null means the costliest
   repairPlan: null,      // previewed scorecard repair, before anything is written
   repairCourseId: null,
   rosterState: null,     // what the last roster read managed, shown at the gate
@@ -2384,19 +2388,23 @@ function renderPartHead(part, ctx) {
 
 function renderStatsPart(part, ctx) {
   const { rounds } = ctx;
-  // The same trend card as Overview, in the same place, drawing only
-  // this part — so switching tabs reads as zooming in.
-  const headline = renderPartHead(part, ctx) + renderTrendCard(trendSeries(ctx.allRounds, bench()), part);
+  // The same trend card as Overview, drawing only this part. Where a
+  // part has a picture, the picture comes first: it is the thing a new
+  // player can read, and the trend is the thing they grow into.
+  const trend = renderTrendCard(trendSeries(ctx.allRounds, bench()), part);
+  const headline = renderPartHead(part, ctx) + trend;
 
   if (part === 'ott') {
-    return `${headline}
-      ${renderTeeCard(teeOutcomes(rounds, bench()))}
-      ${renderMissCard('Tee shot misses', missTally(rounds, 'ott', bench()))}`;
+    return `${renderPartHead(part, ctx)}
+      ${renderTeeMap(rounds)}
+      ${trend}
+      ${renderTeeCard(teeOutcomes(rounds, bench()))}`;
   }
   if (part === 'app') {
     const cd = clubDistances(rounds, bench());
-    return `${headline}
+    return `${renderPartHead(part, ctx)}
       ${renderGreenCard(rounds)}
+      ${trend}
       ${renderApproachCard(approachBuckets(rounds, bench()))}
       ${renderClubCard(cd)}${renderGappingCard(cd)}`;
   }
@@ -3049,6 +3057,124 @@ function renderBestsCard(bests, allRounds) {
         </div>
         <div class="row-val" style="font-size:17px;color:var(--green-mid)">${value}</div>
       </div>`).join('')}
+  </div>`;
+}
+
+/** A string to a 32-bit number, for seeding a dot from a shot's id. */
+function hashString(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+const TEE_ZONE_NAMES = { left: 'Left', centre: 'On target', right: 'Right' };
+
+/**
+ * Tee shots on a hole seen from above: fairway down the middle, rough
+ * either side, trouble on the edges. One ball per tee shot, in the
+ * column its miss went. Tapping a side fills in the card underneath.
+ */
+function renderTeeMap(rounds) {
+  const t = teeSides(rounds, bench());
+  if (!t.total) return '';
+  const byCost = STATE.teeMode === 'cost';
+  const per = (z) => (z.count ? z.sg / z.count : 0);
+  const pct = (n) => Math.round((n / t.total) * 100);
+
+  // Default to the side that costs most per shot, so the card opens on
+  // the thing worth knowing.
+  const sides = ['left', 'right'].filter((k) => t.zones[k].count);
+  const costliest = sides.sort((a, b) => per(t.zones[a]) - per(t.zones[b]))[0] || 'centre';
+  const key = t.zones[STATE.teeZone] ? STATE.teeZone : costliest;
+  const zone = t.zones[key];
+
+  const W = 360;
+  const H = 300;
+  const col = { left: [40, 120], centre: [120, 240], right: [240, 320] };
+  const worstLoss = Math.max(0.15, ...Object.values(t.zones).map((z) => Math.abs(Math.min(0, per(z)))));
+
+  const tint = (k) => {
+    const z = t.zones[k];
+    if (!byCost || !z.count || per(z) >= 0) return '';
+    const [x0, x1] = k === 'centre' ? col.centre : k === 'left' ? [0, 120] : [240, W];
+    const a = Math.min(0.08 + (Math.abs(per(z)) / worstLoss) * 0.3, 0.4);
+    return `<rect x="${x0}" y="0" width="${x1 - x0}" height="${H - 40}" fill="var(--loss)" fill-opacity="${a.toFixed(2)}"/>`;
+  };
+
+  const dots = [];
+  Object.entries(t.zones).forEach(([k, z]) => {
+    const colour = !byCost ? 'var(--text)' : per(z) >= 0 ? 'var(--gain)' : 'var(--loss)';
+    z.shots.forEach((s) => {
+      const rand = seededRandom(hashString(s.id));
+      let x0;
+      let x1;
+      if (s.trouble && k !== 'centre') [x0, x1] = k === 'left' ? [6, 34] : [326, 354];
+      else [x0, x1] = col[k];
+      const x = x0 + 8 + rand() * (x1 - x0 - 16);
+      const y = s.short ? 200 + rand() * 45 : s.long ? 18 + rand() * 30 : 55 + rand() * 135;
+      dots.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.4" fill="${colour}" fill-opacity="${k === key ? 0.95 : 0.45}"/>`);
+    });
+  });
+
+  const pill = (k) => {
+    const z = t.zones[k];
+    return `<button class="tee-pill ${k === key ? 'active' : ''}" data-tee-zone="${k}" aria-pressed="${k === key}">
+      <span>${TEE_ZONE_NAMES[k]}</span>
+      <strong class="mono ${byCost && z.count ? sgVerdict(per(z)).cls : ''}">${z.count ? (byCost ? fmtSG(per(z)) : `${z.count} · ${pct(z.count)}%`) : '–'}</strong>
+    </button>`;
+  };
+
+  const verdict = teeSideVerdict(t, key, GREEN_MIN_SHOTS);
+  const thin = zone.count < GREEN_MIN_SHOTS;
+
+  return `<div class="card">
+    <h2>Where your drives go</h2>
+    <p class="muted">Each ball is one tee shot on a par 4 or 5. Tap a side to see what it costs.</p>
+    <div class="chip-grid g2" style="gap:6px">
+      <button class="chip ${byCost ? '' : 'active'}" data-tee-mode="count" aria-pressed="${!byCost}" style="min-height:44px;font-size:11px">How often</button>
+      <button class="chip ${byCost ? 'active' : ''}" data-tee-mode="cost" aria-pressed="${byCost}" style="min-height:44px;font-size:11px">What it costs</button>
+    </div>
+    <div class="tee-pills">${pill('left')}${pill('centre')}${pill('right')}</div>
+    <svg class="tee-map" viewBox="0 0 ${W} ${H}" role="img"
+         aria-label="${pct(t.zones.left.count)}% left, ${pct(t.zones.centre.count)}% on target, ${pct(t.zones.right.count)}% right">
+      <defs>
+        <pattern id="tee-hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="7" stroke="var(--text-3)" stroke-width="1.4" stroke-opacity="0.5"/>
+        </pattern>
+      </defs>
+      <rect x="0" y="0" width="40" height="${H - 40}" fill="url(#tee-hatch)"/>
+      <rect x="${W - 40}" y="0" width="40" height="${H - 40}" fill="url(#tee-hatch)"/>
+      <rect x="40" y="0" width="${W - 80}" height="${H - 40}" fill="var(--gain)" fill-opacity="0.06"/>
+      <rect x="120" y="0" width="120" height="${H - 40}" rx="40" fill="var(--gain)" fill-opacity="0.16"/>
+      ${tint('left')}${tint('centre')}${tint('right')}
+      <line x1="0" y1="196" x2="${W}" y2="196" stroke="var(--text-3)" stroke-opacity="0.35" stroke-dasharray="3 5"/>
+      <rect x="160" y="${H - 26}" width="40" height="14" rx="3" fill="var(--text-3)" fill-opacity="0.5"/>
+      <text x="180" y="${H - 2}" text-anchor="middle" class="green-label" fill="var(--text-3)" style="font-size:10px">TEE</text>
+      ${dots.join('')}
+      ${['left', 'centre', 'right'].map((k) => {
+        const [x0, x1] = k === 'left' ? [0, 120] : k === 'right' ? [240, W] : col.centre;
+        return `<rect x="${x0}" y="0" width="${x1 - x0}" height="${H - 40}" fill="transparent" data-tee-zone="${k}" style="cursor:pointer"/>`;
+      }).join('')}
+    </svg>
+    <div class="tee-detail" style="${thin ? 'opacity:0.6' : ''}">
+      <h3 class="green-headline">${esc(key === 'centre' ? 'On target' : `${TEE_ZONE_NAMES[key]} miss`)}${thin && zone.count ? ' <span class="thin-tag">LOW SAMPLE</span>' : ''}</h3>
+      <div class="tee-stats">
+        <div><span>Shots</span><strong class="mono">${zone.count}</strong></div>
+        <div><span>Share</span><strong class="mono">${pct(zone.count)}%</strong></div>
+        <div><span>Per shot</span><strong class="mono ${zone.count ? sgVerdict(per(zone)).cls : ''}">${zone.count ? fmtSG(per(zone)) : '–'}</strong></div>
+        <div><span>Total</span><strong class="mono ${zone.count ? sgVerdict(zone.sg, 'round').cls : ''}">${zone.count ? fmtSG(zone.sg).replace(/(\.\d)\d$/, '$1') : '–'}</strong></div>
+      </div>
+      ${verdict ? `<p style="margin:8px 0 0">${esc(verdict)}</p>` : ''}
+    </div>
+    ${t.unlogged ? `<p class="tiny" style="margin-top:6px">${t.unlogged} tee shot${t.unlogged === 1 ? '' : 's'} missed the fairway with no direction logged, so ${t.unlogged === 1 ? 'it is' : 'they are'} not drawn.</p>` : ''}
+    <p class="tiny" style="margin-top:4px">Balls below the dashed line came up short. Balls in the hatched edges ended in trouble or took a penalty.</p>
+    <details class="more-numbers">
+      <summary>Show the numbers</summary>
+      ${renderMissCard('Tee shot misses', missTally(rounds, 'ott', bench()))}
+    </details>
   </div>`;
 }
 
@@ -5532,7 +5658,7 @@ const ACTIONS = {
 };
 
 function onClick(event) {
-  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-dist-step],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-bag-club],[data-miss-inline],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-green-band],[data-smooth],[data-hcp-window],[data-repair-course]');
+  const target = event.target.closest('[data-action],[data-nav],[data-lie],[data-miss],[data-penalty],[data-tee-idx],[data-nine-idx],[data-setup-tee],[data-par],[data-scope],[data-standings],[data-dist-step],[data-verified],[data-edit-shot],[data-goto-hole],[data-preset],[data-club],[data-set-theme],[data-presets],[data-clubs],[data-bag-club],[data-miss-inline],[data-open-hole],[data-trend],[data-setup-mode],[data-score-step],[data-benchmark],[data-cal-day],[data-cal-step],[data-tt-kind],[data-tt-practice],[data-tt-course],[data-tt-tee],[data-tt-layout],[data-tt-invite],[data-miss-mode],[data-green-band],[data-tee-mode],[data-tee-zone],[data-smooth],[data-hcp-window],[data-repair-course]');
   if (!target) return;
 
   const benchmark = target.getAttribute('data-benchmark');
@@ -5546,6 +5672,12 @@ function onClick(event) {
 
   const greenBand = target.getAttribute('data-green-band');
   if (greenBand) { STATE.greenBand = greenBand; return render(); }
+
+  const teeMode = target.getAttribute('data-tee-mode');
+  if (teeMode) { STATE.teeMode = teeMode; return render(); }
+
+  const teeZone = target.getAttribute('data-tee-zone');
+  if (teeZone) { STATE.teeZone = teeZone; return render(); }
 
   const repairCourse = target.getAttribute('data-repair-course');
   if (repairCourse !== null) {

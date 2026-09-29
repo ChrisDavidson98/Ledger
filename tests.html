@@ -240,6 +240,28 @@ check('green verdict: short twice as often as long is a one-way miss', () => {
   return spread.line.endsWith('your line is leaking') ? null : spread.line;
 });
 
+check('tee map puts diagonal misses on their side and trouble in the strip', () => {
+  const r = roundOf([
+    { par: 4, yards: 400, shots: [shot('tee', 400, 'rough', 150, { miss: 'short-left' })] },
+    { par: 4, yards: 400, shots: [shot('tee', 400, 'recovery', 150, { miss: 'right' })] },
+    { par: 4, yards: 400, shots: [shot('tee', 400, 'fairway', 150)] },
+    { par: 4, yards: 400, shots: [shot('tee', 400, 'rough', 150)] },
+    { par: 3, yards: 160, shots: [shot('tee', 160, 'rough', 20, { miss: 'left' })] },
+  ]);
+  const t = M.teeSides([r]);
+  if (t.zones.left.count !== 1 || !t.zones.left.shots[0].short) return 'short-left should be a short left miss';
+  if (t.zones.right.count !== 1 || !t.zones.right.shots[0].trouble) return 'recovery should be trouble';
+  if (t.zones.centre.count !== 1) return 'an unmarked fairway is on target';
+  return t.unlogged === 1 && t.total === 3 ? null : `unlogged ${t.unlogged}, total ${t.total} (par 3 must be left out)`;
+});
+
+check('tee verdict: the rarer side costing double is the miss to take off', () => {
+  const z = (count, sg) => ({ count, sg, shots: [] });
+  const t = { total: 60, zones: { left: z(10, -8), centre: z(30, 3), right: z(20, -6) } };
+  const v = M.teeSideVerdict(t, 'left');
+  return v && v.includes('Left is the miss to take off the course') ? null : v;
+});
+
 /* --- Editing shots ---------------------------------------------- */
 
 suite('Editing');

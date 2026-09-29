@@ -1176,3 +1176,17 @@ button.stand-row {
 .more-numbers { margin-top: 12px; border-top: 1px solid var(--rule-soft); padding-top: 8px; }
 .more-numbers summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-size: 13px; color: var(--text-2); }
 .more-numbers > .card { border: none; padding: 0; margin: 0; background: none; }
+
+/* --- Tee map ------------------------------------------------------- */
+.tee-map { display: block; width: 100%; max-width: 420px; height: auto; margin: 0 auto; }
+.tee-pills { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; max-width: 420px; margin: 10px auto 6px; }
+.tee-pill { min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: none; border: 1px solid var(--control); border-radius: var(--radius); color: var(--text-2); cursor: pointer; padding: 4px; }
+.tee-pill span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.tee-pill strong { font-size: 13px; }
+.tee-pill strong:not(.sg-pos):not(.sg-neg):not(.sg-zero) { color: var(--text); }
+.tee-pill.active { border-color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.tee-detail { margin-top: 10px; border-top: 1px solid var(--rule-soft); padding-top: 6px; }
+.tee-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+.tee-stats span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); }
+.tee-stats strong { font-size: 19px; }
