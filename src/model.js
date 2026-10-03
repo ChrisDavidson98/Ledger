@@ -817,13 +817,16 @@ export function greensInRegulation(rounds) {
       holes += 1;
       byPar[par].holes += 1;
 
+      // Regulation is counted in strokes, not shots: a penalty re-tee
+      // means the third shot on a par 4 is the fifth stroke, not a GIR.
+      // Holing out counts, and so does being on the green in regulation.
       const allowed = par - 2;
-      const shot = hole.shots[allowed - 1];
+      let strokes = 0;
       let hit = false;
-      if (shot) {
-        // Holing out counts, and so does being on the green in regulation.
-        if (shot.holed || shot.endLie === 'green') hit = true;
-        else if (hole.shots.slice(0, allowed).some((s) => s.holed)) hit = true;
+      for (const shot of hole.shots) {
+        strokes += 1 + (shot.penalty || 0);
+        if (strokes > allowed) break;
+        if (shot.holed || shot.endLie === 'green') { hit = true; break; }
       }
       if (hit) {
         greens += 1;

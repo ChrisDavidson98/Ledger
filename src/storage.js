@@ -246,7 +246,7 @@ export function getBenchmark() {
   if (chosen) return chosen;
   // Against tour nearly every row an amateur sees says "costing
   // strokes", which teaches a new player nothing. New devices start at
-  // a 10 handicap instead. A device that already holds rounds was
+  // the player's own level instead (DEFAULT_BENCHMARK). A device that already holds rounds was
   // reading tour before this default existed, so it keeps tour rather
   // than having every number shift under it. Settled once, then stored.
   const fallback = getRounds().length ? 'tour' : DEFAULT_BENCHMARK;

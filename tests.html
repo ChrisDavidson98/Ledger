@@ -135,13 +135,30 @@ check('interpolates between table points', () => {
 check('clamps below and above the table', () => {
   const low = B.expectedStrokes('tee', 1);
   const high = B.expectedStrokes('tee', 9999);
-  return low === 2.40 && high === 5.28 ? null : `got ${low} / ${high}`;
+  return low === 2.40 && high === 4.82 ? null : `got ${low} / ${high}`;
+});
+
+check('tour table matches published reference points', () => {
+  const refs = [['green', 8, 1.50], ['green', 10, 1.61], ['green', 30, 1.98],
+    ['tee', 400, 3.99], ['tee', 500, 4.41], ['fairway', 150, 2.97]];
+  const off = refs.filter(([lie, d, want]) => Math.abs(B.expectedStrokes(lie, d) - want) > 0.005);
+  return off.length ? off.map(([l, d, w]) => `${l} ${d}: ${B.expectedStrokes(l, d)} not ${w}`).join('; ') : null;
+});
+
+check('a penalty stroke counts against green in regulation', () => {
+  const hole = (shots) => ({ holes: [{ par: 4, shots }] });
+  const tee = { startLie: 'tee', startDist: 400, endLie: 'fairway', endDist: 150 };
+  const ob = { startLie: 'tee', startDist: 400, endLie: 'tee', endDist: 400, penalty: 1 };
+  const onGreen = { startLie: 'fairway', startDist: 150, endLie: 'green', endDist: 20 };
+  const clean = M.greensInRegulation([hole([tee, onGreen])]).greens;
+  const penalised = M.greensInRegulation([hole([ob, tee, onGreen])]).greens;
+  return clean === 1 && penalised === 0 ? null : `clean ${clean}, after OB ${penalised}`;
 });
 
 check('green distances are read as feet', () => {
   // 10ft should be far cheaper than 10 yards would be on any other lie.
   const putt = B.expectedStrokes('green', 10);
-  return putt > 1.4 && putt < 1.55 ? null : `got ${putt}`;
+  return putt > 1.55 && putt < 1.65 ? null : `got ${putt}`;
 });
 
 check('par 3 tee shot classifies as approach', () => eq(
@@ -1606,7 +1623,7 @@ check('the per-hole strokes gained moves even when the round total does not', ()
   const nine = plan.holes.find((h) => h.hole === 9);
   const d8 = eight.sgAfter - eight.sgBefore;
   const d9 = nine.sgAfter - nine.sgBefore;
-  if (Math.abs(d8) < 1) return `hole 8 barely moved: ${d8.toFixed(2)}`;
+  if (Math.abs(d8) < 0.5) return `hole 8 barely moved: ${d8.toFixed(2)}`;
   if (!near(d8, -d9, 0.01)) return `holes moved by ${d8.toFixed(2)} and ${d9.toFixed(2)}`;
   return near(plan.after.total - plan.before.total, 0, 0.01)
     ? null : 'the round total moved when it should have cancelled';

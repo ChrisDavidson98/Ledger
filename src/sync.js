@@ -719,7 +719,11 @@ export async function pullTeeTimes() {
     if (pending.has(teeTime.id)) return;
 
     const mine = existing.get(teeTime.id);
-    if (mine && new Date(mine.updatedAt) >= new Date(teeTime.updatedAt)) return;
+    // Same timestamp is the same version, and the sheet's reading of it
+    // wins: a copy pulled while the server misread the time (8:21 as
+    // 8:02) carries the sheet's own updated_at, and would otherwise
+    // keep the wrong time forever.
+    if (mine && new Date(mine.updatedAt) > new Date(teeTime.updatedAt)) return;
     if (!mine) added += 1;
     store.replaceTeeTime(teeTime);
   });

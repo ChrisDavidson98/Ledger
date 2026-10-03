@@ -1321,7 +1321,7 @@ function screenSettings() {
 
     <div class="card">
       <h2>Benchmark</h2>
-      <p class="muted">Strokes gained answers "compared with whom". Tour is the default and is what every figure meant before this setting existed; the handicap levels ask the same question against somebody nearer your own game, where zero means you played to that standard.</p>
+      <p class="muted">Strokes gained answers "compared with whom". Your level is the default: it measures you against the handicap your own game plays like. Tour is what every figure meant before this setting existed; the handicap levels ask the same question against somebody nearer your own game, where zero means you played to that standard.</p>
       ${benchPicker()}
       <p class="tiny">This is a way of reading the data, not a change to it. Every figure is recomputed from the shots exactly as they were logged, nothing is written back to the sheet, and the setting stays on this phone &mdash; so two people can look at the same round against different standards without either of them affecting the other.</p>
       <p class="tiny">Only the tour table is measured data. The handicap levels are built from it plus the strokes a golfer at that level is expected to lose, spread across the positions a round passes through. Good enough to answer "was that a decent round for a 15", not a substitute for a real tour dataset at every level.</p>
