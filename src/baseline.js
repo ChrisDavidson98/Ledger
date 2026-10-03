@@ -43,9 +43,11 @@ export const CATEGORY_SHORT = {
 const TOUR = {
   // Broadie, Every Shot Counts, tour from the tee: 400y 3.99, 500y
   // 4.41, 600y 4.82. The old rows ran 0.3-0.5 high past 375y and
-  // handed every long drive free strokes gained off the tee.
+  // handed every long drive free strokes gained off the tee. 140y is
+  // held at 2.99: the published 2.97 dips below its neighbours, which
+  // is sampling noise, not golf.
   tee: [
-    [50, 2.40], [100, 2.92], [120, 2.99], [140, 2.97], [160, 2.99], [180, 3.05],
+    [50, 2.40], [100, 2.92], [120, 2.99], [140, 2.99], [160, 2.99], [180, 3.05],
     [200, 3.12], [220, 3.17], [240, 3.25], [260, 3.45], [280, 3.65], [300, 3.71],
     [320, 3.79], [340, 3.86], [360, 3.92], [380, 3.96], [400, 3.99], [420, 4.02],
     [440, 4.08], [460, 4.17], [480, 4.28], [500, 4.41], [520, 4.54], [540, 4.65],

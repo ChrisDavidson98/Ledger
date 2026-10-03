@@ -145,6 +145,18 @@ check('tour table matches published reference points', () => {
   return off.length ? off.map(([l, d, w]) => `${l} ${d}: ${B.expectedStrokes(l, d)} not ${w}`).join('; ') : null;
 });
 
+check('no tour table gets easier as the ball gets further away', () => {
+  // Catches what pinned reference points cannot: a slip between them.
+  const problems = [];
+  Object.entries(B.BASELINES.tour).forEach(([lie, rows]) => {
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] <= rows[i - 1][0]) problems.push(`${lie} ${rows[i][0]} out of order`);
+      if (rows[i][1] < rows[i - 1][1]) problems.push(`${lie} ${rows[i][0]} drops to ${rows[i][1]}`);
+    }
+  });
+  return problems.length ? problems.join('; ') : null;
+});
+
 check('a penalty stroke counts against green in regulation', () => {
   const hole = (shots) => ({ holes: [{ par: 4, shots }] });
   const tee = { startLie: 'tee', startDist: 400, endLie: 'fairway', endDist: 150 };
