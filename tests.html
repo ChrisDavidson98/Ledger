@@ -435,6 +435,28 @@ check('one nine played twice builds an 18 hole round', () => {
   return eq(holes[9].yards, holes[0].yards, 'hole 10 yardage');
 });
 
+check('an eighteen can start on the back nine', () => {
+  const sa = SEED_COURSES.find((c) => c.id === 'seed_standrews');
+  const full = C.playOptions(sa).find((o) => o.holeCount === 18);
+  if (!full) return 'no eighteen on St Andrews';
+  const back = C.findPlayOption(sa, `${full.key}:back`);
+  if (!back) return 'back-first key not found';
+  const usual = C.buildRoundHoles(sa, full, 'Black');
+  const holes = C.buildRoundHoles(sa, back, 'Black');
+  if (holes[0].hole !== 1) return `numbered from ${holes[0].hole}`;
+  if (holes[0].sourceNine !== usual[9].sourceNine || holes[0].sourceHole !== usual[9].sourceHole) {
+    return `first hole is ${holes[0].sourceNine} ${holes[0].sourceHole}`;
+  }
+  if (holes[9].sourceHole !== usual[0].sourceHole) return `tenth hole is ${holes[9].sourceHole}`;
+  return C.backFirstOption(back) === null ? null : 'reversed twice';
+});
+
+check('a nine has no back-first version', () => {
+  const sa = SEED_COURSES.find((c) => c.id === 'seed_standrews');
+  const nine = C.playOptions(sa).find((o) => o.holeCount === 9);
+  return C.findPlayOption(sa, `${nine.key}:back`) === null ? null : 'a nine was reversed';
+});
+
 check('seeded cards total what the scorecards say', () => {
   const gardner = SEED_COURSES.find((c) => c.id === 'seed_gardner');
   const blue = C.nineYardage(gardner.nines[0], 'Blue');
@@ -1594,6 +1616,17 @@ function ironHorseRound(rows, player = 'Chris') {
   r.teeName = 'White';
   return r;
 }
+
+check('a round started on the back nine is still recognised', () => {
+  const sa = JSON.parse(JSON.stringify(SEED_COURSES.find((c) => c.id === 'seed_standrews')));
+  const full = C.playOptions(sa).find((o) => o.holeCount === 18);
+  const back = C.backFirstOption(full);
+  const r = roundOf(C.buildRoundHoles(sa, back, 'Black').map((h) => ({ par: h.par, yards: h.yards, shots: [] })));
+  r.teeName = 'Black';
+  const found = RP.inferPlayOption(sa, r);
+  if (found.status !== 'exact') return `status ${found.status}`;
+  return eq(found.option.key, back.key, 'layout');
+});
 
 check('the layout is worked out from the pars, not from the round', () => {
   // It has to be, because sourceNine and layout do not survive the

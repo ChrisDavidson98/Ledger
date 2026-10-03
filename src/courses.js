@@ -128,8 +128,41 @@ export function playOptions(course) {
   return options;
 }
 
+const BACK_FIRST = ':back';
+
+/**
+ * The same eighteen played second nine first: a frost delay thaws the
+ * 10th before the 1st, or the starter sends a group off the back. Not
+ * a pairing of its own, so nobody has to set one up per course; the
+ * key carries a suffix, which is all a tee time needs to sync it.
+ */
+export function backFirstOption(option) {
+  if (!option || option.nineIds.length !== 2 || option.backFirst) return null;
+  return {
+    ...option,
+    key: option.key + BACK_FIRST,
+    label: `${option.label} (back nine first)`,
+    nineIds: option.nineIds.slice().reverse(),
+    backFirst: true,
+  };
+}
+
 export function findPlayOption(course, key) {
-  return playOptions(course).find((o) => o.key === key) || null;
+  const k = String(key || '');
+  if (k.endsWith(BACK_FIRST)) {
+    return backFirstOption(findPlayOption(course, k.slice(0, -BACK_FIRST.length)));
+  }
+  return playOptions(course).find((o) => o.key === k) || null;
+}
+
+/**
+ * Every layout a finished round could have been played on, back-first
+ * eighteens after the rest so a layout listed in its own right still
+ * wins when both orders happen to fit.
+ */
+export function layoutCandidates(course) {
+  const options = playOptions(course);
+  return options.concat(options.map(backFirstOption).filter(Boolean));
 }
 
 /**

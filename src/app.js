@@ -126,6 +126,8 @@ import {
   upsertCourse,
   playOptions,
   findPlayOption,
+  backFirstOption,
+  layoutCandidates,
   buildRoundHoles,
   totalYards,
   totalPar,
@@ -156,6 +158,7 @@ const STATE = {
   setupCourseId: null, // course chosen, awaiting a tee and layout
   setupTee: null,
   setupMode: 'full',
+  setupBackFirst: false, // start the eighteen on the 10th
   viewRoundId: null,
   loginDraft: '',
   importText: '',
@@ -586,7 +589,13 @@ function screenPickTee() {
     ${eighteens.length ? `
       <div class="card">
         <h2>Eighteen</h2>
-        ${eighteens.map(optionRow).join('')}
+        <div class="chip-grid g2">
+          <button class="chip ${STATE.setupBackFirst ? '' : 'active'}" data-setup-back="0">Start on 1</button>
+          <button class="chip ${STATE.setupBackFirst ? 'active' : ''}" data-setup-back="1">Start on 10</button>
+        </div>
+        ${(STATE.setupBackFirst
+          ? eighteens.map(backFirstOption).filter(Boolean)
+          : eighteens).map(optionRow).join('')}
       </div>` : ''}
 
     <div class="card">
@@ -1698,19 +1707,23 @@ function screenDetail() {
  * resort, and only when exactly one layout fits.
  */
 function roundLayout(round, course) {
-  const options = playOptions(course);
-  const named = options.find((o) => o.label === round.layout);
+  const named = layoutCandidates(course).find((o) => o.label === round.layout);
   if (named) return named;
 
-  const sized = options.filter((o) => buildRoundHoles(course, o, round.teeName).length === round.holes.length);
   const fits = (o, withYards) => buildRoundHoles(course, o, round.teeName).every((h, i) =>
     h.par === Number(round.holes[i].par)
     && (!withYards || Math.round(h.yards) === Math.round(Number(round.holes[i].yards))));
+  const matchIn = (options) => {
+    const sized = options.filter((o) => buildRoundHoles(course, o, round.teeName).length === round.holes.length);
+    const exact = sized.filter((o) => fits(o, true));
+    if (exact.length) return exact[0];
+    const byPar = sized.filter((o) => fits(o, false));
+    return byPar.length === 1 ? byPar[0] : null;
+  };
 
-  const exact = sized.filter((o) => fits(o, true));
-  if (exact.length) return exact[0];
-  const byPar = sized.filter((o) => fits(o, false));
-  return byPar.length === 1 ? byPar[0] : null;
+  // The usual order first; back-nine-first only if nothing else fits.
+  const options = playOptions(course);
+  return matchIn(options) || matchIn(options.map(backFirstOption).filter(Boolean));
 }
 
 /**
@@ -2355,11 +2368,16 @@ function screenTeeTimeEdit() {
           <label>Playing</label>
           <div class="chip-grid g2">
             ${options.map((option) => `
-              <button class="chip ${draft.layoutKey === option.key ? 'active' : ''}"
+              <button class="chip ${String(draft.layoutKey || '').replace(/:back$/, '') === option.key ? 'active' : ''}"
                       data-tt-layout="${esc(option.key)}" data-holes="${option.holeCount}"
                       style="font-size:12px">${esc(option.label)}</button>
             `).join('')}
           </div>
+          ${draft.holes === 18 && backFirstOption(findPlayOption(course, String(draft.layoutKey || '').replace(/:back$/, ''))) ? `
+            <div class="chip-grid g2" style="margin-top:8px">
+              <button class="chip ${/:back$/.test(draft.layoutKey) ? '' : 'active'}" data-tt-back="0">Start on 1</button>
+              <button class="chip ${/:back$/.test(draft.layoutKey) ? 'active' : ''}" data-tt-back="1">Start on 10</button>
+            </div>` : ''}
           <p class="tiny">Choosing this now is what lets the round start straight from the diary on the day, without going back through the course picker.</p>
         ` : ''}
       </div>
@@ -5603,7 +5621,7 @@ const ACTIONS = {
   'goto-setup-courses': () => go('setup', { courseDraft: null }),
   'open-courses': () => go('courses', { courseDraft: null, courseReturn: 'courses' }),
   'pick-course': (el) => go('setup', {
-    setupCourseId: el.getAttribute('data-id'), setupTee: null,
+    setupCourseId: el.getAttribute('data-id'), setupTee: null, setupBackFirst: false,
   }),
   'start-round': (el) => startRound(el.getAttribute('data-option')),
   'fill-par': () => {
@@ -6088,7 +6106,7 @@ function onClick(event) {
   const ttLayout = target.getAttribute('data-tt-layout');
   if (ttLayout) {
     const draft = STATE.teeTimeDraft;
-    const same = draft.layoutKey === ttLayout;
+    const same = String(draft.layoutKey || '').replace(/:back$/, '') === ttLayout;
     draft.layoutKey = same ? null : ttLayout;
     draft.holes = same ? null : Number(target.getAttribute('data-holes')) || null;
     return render();
@@ -6221,6 +6239,20 @@ function onClick(event) {
   const penalty = target.getAttribute('data-penalty');
   if (penalty !== null) {
     STATE.draft.penalty = Number(penalty);
+    return render();
+  }
+
+  const setupBack = target.getAttribute('data-setup-back');
+  if (setupBack !== null) {
+    STATE.setupBackFirst = setupBack === '1';
+    return render();
+  }
+
+  const ttBack = target.getAttribute('data-tt-back');
+  if (ttBack !== null) {
+    const draft = STATE.teeTimeDraft;
+    const base = String(draft.layoutKey || '').replace(/:back$/, '');
+    draft.layoutKey = ttBack === '1' ? `${base}:back` : base;
     return render();
   }
 

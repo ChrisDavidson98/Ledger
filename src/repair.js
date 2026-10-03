@@ -34,7 +34,7 @@
 
 import { relinkHole, roundTotals, holeTotals, playedHoles } from './model.js';
 import { CATEGORIES } from './baseline.js';
-import { playOptions, buildRoundHoles } from './courses.js';
+import { playOptions, buildRoundHoles, backFirstOption } from './courses.js';
 
 /**
  * Work out which nine or pairing a round was played on.
@@ -55,11 +55,17 @@ import { playOptions, buildRoundHoles } from './courses.js';
  */
 export function inferPlayOption(course, round) {
   const pars = round.holes.map((h) => Number(h.par));
-  const matches = playOptions(course).filter((option) => {
+  const fits = (option) => {
     const holes = buildRoundHoles(course, option, round.teeName);
     if (holes.length !== pars.length) return false;
     return holes.every((h, i) => Number(h.par) === pars[i]);
-  });
+  };
+  // Back-first orders only when nothing in the usual order fits, so a
+  // course whose nines read the same both ways stays unambiguous.
+  let matches = playOptions(course).filter(fits);
+  if (!matches.length) {
+    matches = playOptions(course).map(backFirstOption).filter(Boolean).filter(fits);
+  }
 
   if (matches.length === 1) return { option: matches[0], status: 'exact' };
   if (matches.length > 1) return { option: null, status: 'ambiguous', candidates: matches };
