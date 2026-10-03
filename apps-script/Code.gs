@@ -310,14 +310,23 @@ function setupSheets() {
 }
 
 /** All data rows as objects keyed by header name. */
-function readAll(name) {
+/**
+ * `displayColumns` are read as the text the sheet is showing rather
+ * than as values, for columns where a value would be a Date nobody
+ * meant to create.
+ */
+function readAll(name, displayColumns) {
   var sheet = sheetFor(name);
-  var values = sheet.getDataRange().getValues();
+  var range = sheet.getDataRange();
+  var values = range.getValues();
   if (values.length < 2) return [];
+  var shown = displayColumns && displayColumns.length ? range.getDisplayValues() : null;
   var headers = values[0];
-  return values.slice(1).map(function (row) {
+  return values.slice(1).map(function (row, r) {
     var obj = {};
-    headers.forEach(function (h, i) { obj[h] = row[i]; });
+    headers.forEach(function (h, i) {
+      obj[h] = shown && displayColumns.indexOf(h) !== -1 ? shown[r + 1][i] : row[i];
+    });
     return obj;
   });
 }
@@ -636,25 +645,42 @@ function textColumns(name, columns) {
  * The app drops them on the way in.
  */
 function pullTeeTimes() {
-  var zone = book().getSpreadsheetTimeZone();
-
-  var rows = readAll('tee_times').filter(function (row) {
+  // A row written before the text format was applied, or typed into
+  // the sheet by hand, can still hold a real date or time value. Read
+  // those columns as the text the sheet is SHOWING. Formatting the Date
+  // ourselves is not safe: a bare time is a Date in December 1899, when
+  // most zones ran on local mean time, and Apps Script converts it with
+  // a different offset than Sheets does — 8:21 came back as 8:02.
+  var rows = readAll('tee_times', ['date', 'time']).filter(function (row) {
     return String(row.tee_time_id || '') !== '';
   }).map(function (row) {
-    // A row written before the text format was applied, or typed into
-    // the sheet by hand, can still come back as a real Date. Format it
-    // to the day and time the sheet was SHOWING rather than letting
-    // the client re-parse a stringified Date and land a day out.
-    row.date = asText(row.date, zone, 'yyyy-MM-dd');
-    row.time = asText(row.time, zone, 'HH:mm');
+    row.date = normalizeDate(row.date);
+    row.time = normalizeTime(row.time);
     return row;
   });
   return { ok: true, teeTimes: rows, serverTime: new Date().toISOString() };
 }
 
-function asText(value, zone, pattern) {
-  if (value instanceof Date) return Utilities.formatDate(value, zone, pattern);
-  return String(value == null ? '' : value).replace(/^'/, '');
+/**
+ * The displayed text depends on the cell's format, so a hand-typed
+ * cell can read "8:21" or "8:21 AM" or "9/14/2026". Bring those back
+ * to the HH:MM and YYYY-MM-DD the app expects; leave anything
+ * unrecognised as typed.
+ */
+function normalizeTime(value) {
+  var text = String(value == null ? '' : value).replace(/^'/, '').trim();
+  var m = /^(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?$/.exec(text);
+  if (!m) return text;
+  var h = Number(m[1]);
+  if (m[3]) h = (h % 12) + (/^p/i.test(m[3]) ? 12 : 0);
+  return (h < 10 ? '0' : '') + h + ':' + m[2];
+}
+
+function normalizeDate(value) {
+  var text = String(value == null ? '' : value).replace(/^'/, '').trim();
+  var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text);
+  if (!m) return text;
+  return m[3] + '-' + (m[1].length < 2 ? '0' : '') + m[1] + '-' + (m[2].length < 2 ? '0' : '') + m[2];
 }
 
 /* --- Players ------------------------------------------------------ */
