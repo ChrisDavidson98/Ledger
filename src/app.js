@@ -1898,7 +1898,7 @@ function teeTimeRow(teeTime) {
   return `<button class="row" data-action="view-tee-time" data-id="${esc(teeTime.id)}">
     <div class="badge" style="font-size:11px">${teeTime.kind === 'practice' ? 'PR' : 'GO'}</div>
     <div class="row-meta">
-      <div class="rname">${esc(describeTeeTime(teeTime))}${
+      <div class="rname">${esc(describeBooking(teeTime))}${
         teeTime.status === 'cancelled' ? ' <span class="tiny">cancelled</span>' : ''
       }</div>
       <div class="rsub">${esc(when)} &middot; ${esc(fmtTime(teeTime.time))}${
@@ -1968,7 +1968,7 @@ function renderInviteBanner() {
       <button class="row" data-action="open-invite" data-id="${esc(t.id)}">
         <div class="badge" style="font-size:11px">${t.kind === 'practice' ? 'PR' : 'GO'}</div>
         <div class="row-meta">
-          <div class="rname">${esc(describeTeeTime(t))}</div>
+          <div class="rname">${esc(describeBooking(t))}</div>
           <div class="rsub">${esc(fmtDateKey(t.date))}${t.time ? ` &middot; ${esc(fmtTime(t.time))}` : ''}${
             invites.length > 1 ? ` &middot; from ${esc(t.owner)}` : ''
           }</div>
@@ -2161,7 +2161,7 @@ function renderDiaryStrip() {
     ${upcoming.map((t) => `
       <button class="row" data-action="view-tee-time" data-id="${esc(t.id)}">
         <span class="mono sg-pos" style="width:62px;font-size:11px;font-weight:600">${dayLabel(t.date)}</span>
-        <div class="row-meta"><div class="rname" style="font-weight:500">${esc(describeTeeTime(t))} <span style="color:var(--text-2)">&middot; ${esc(fmtTime(t.time))}</span></div></div>
+        <div class="row-meta"><div class="rname" style="font-weight:500">${esc(describeBooking(t))} <span style="color:var(--text-2)">&middot; ${esc(fmtTime(t.time))}</span></div></div>
         <span class="mono" style="font-size:11px;color:var(--text-2)">${t.kind === 'practice' ? 'PR' : 'GO'}</span>
       </button>`).join('')}
     ${last ? (() => {
@@ -2195,7 +2195,7 @@ function renderScheduleBanner() {
         <h2>Today${teeTime.time ? ` &middot; ${esc(fmtTime(teeTime.time))}` : ''}</h2>
         <span class="tiny">${esc(KIND_LABELS[teeTime.kind])}</span>
       </div>
-      <p class="muted">${esc(describeTeeTime(teeTime))}${
+      <p class="muted">${esc(describeBooking(teeTime))}${
         teeTime.teeName ? ` &mdash; ${esc(teeTime.teeName)} tees` : ''
       }${(teeTime.invitees || []).length ? `<br>With ${esc(teeTime.invitees.join(', '))}` : ''}</p>
       ${played ? `<p class="tiny">Your round for this one is already logged.</p>` : ''}
@@ -2225,7 +2225,7 @@ function screenTeeTime() {
   return `${topbar('Tee Time')}
     ${notices()}
     <div class="card">
-      <h2>${esc(describeTeeTime(teeTime))}</h2>
+      <h2>${esc(describeBooking(teeTime))}</h2>
       <p class="muted">
         ${esc(fmtDateKey(teeTime.date))} &middot; ${esc(fmtTime(teeTime.time))}<br>
         ${esc(KIND_LABELS[teeTime.kind])}${teeTime.teeName ? ` &middot; ${esc(teeTime.teeName)} tees` : ''}
@@ -4684,6 +4684,22 @@ function isValidDist(value) {
 function safeCourse(id) {
   const course = store.getCourse(id);
   return course ? repairCourse(course) : null;
+}
+
+/**
+ * A tee time's name, plus which nines when the course leaves that open:
+ * "Sykes · Red / White", where three nines pair up several ways. A
+ * course with one way to play eighteen gains nothing from saying so.
+ * The starting nine is left off; that is usually decided on the day.
+ */
+function describeBooking(teeTime) {
+  const name = describeTeeTime(teeTime);
+  if (teeTime.kind === 'practice' || !teeTime.layoutKey || !teeTime.courseId) return name;
+  const course = safeCourse(teeTime.courseId);
+  const option = course && findPlayOption(course, String(teeTime.layoutKey).replace(/:back$/, ''));
+  if (!option) return name;
+  const rivals = playOptions(course).filter((o) => o.holeCount === option.holeCount);
+  return rivals.length > 1 ? `${name} · ${option.label}` : name;
 }
 
 /** Where an in-progress round should resume: shot entry or the card. */
