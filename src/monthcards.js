@@ -124,7 +124,7 @@ function shortDay(value) {
 }
 
 /** Paper, masthead and footer: the part every card shares. */
-function frame(ctx, recap, key, handle) {
+function frame(ctx, recap, handle) {
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = C.paper;
   ctx.fillRect(0, 0, W, H);
@@ -149,7 +149,6 @@ function frame(ctx, recap, key, handle) {
   ctx.lineTo(W - PAD - 22, H - 74);
   ctx.closePath();
   ctx.fill();
-  return key;
 }
 
 /** The label and the finding: what every card after the cover opens with. */
@@ -361,7 +360,7 @@ export function drawCard(recap, key, { handle = '', theme = 'light' } = {}) {
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d');
-  frame(ctx, recap, key, handle);
+  frame(ctx, recap, handle);
   CARDS[key](ctx, recap);
   return canvas;
 }

@@ -9,3 +9,6 @@ desktop.ini
 
 # Local config that should never be shared
 src/config.local.js
+
+# Claude Code local preview config
+.claude/
