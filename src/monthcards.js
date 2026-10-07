@@ -10,9 +10,29 @@
 
 import { CATEGORIES, CATEGORY_LABELS } from './baseline.js';
 import {
-  C, W, H, PAD, SERIF, MONO, SANS, eyebrow, rule, fitFont, loadFonts, fmtSG,
+  C as LIGHT, W, H, PAD, SERIF, MONO, SANS, eyebrow as paperEyebrow, rule, fitFont, loadFonts, fmtSG,
 } from './recap.js';
 import { signed } from './monthly.js';
+
+/* The app's dark theme, for anyone who would rather post that. The
+   round recap stays on paper; this is a choice made per phone. */
+const DARK = {
+  paper: '#141816',
+  grid: '#191e1c',
+  ink: '#e8eae7',
+  soft: '#a4ada8',
+  faint: '#79837e',
+  rule: '#2e3833',
+  gain: '#7fc39b',
+  loss: '#e8785a',
+};
+
+let C = LIGHT;
+
+/** The shared label, in whichever palette is being drawn. */
+function eyebrow(ctx, text, x, y, colour = C.soft, align = 'left', size = 22) {
+  paperEyebrow(ctx, text, x, y, colour, align, size);
+}
 
 const CARD_LABELS = {
   cover: 'Monthly recap',
@@ -186,9 +206,6 @@ const CARDS = {
     });
 
     block(ctx, recap.captions.cover, y + 84, { size: 46, style: 'italic 400', colour: C.soft, maxLines: 2 });
-    if (cover.skipped) {
-      eyebrow(ctx, `${cover.skipped} shot${cover.skipped === 1 ? '' : 's'} left out as likely mis-entries`, PAD, FOOT - 28, C.faint, 'left', 18);
-    }
   },
 
   sg(ctx, recap) {
@@ -349,7 +366,8 @@ function breakdown(ctx, recap, part, label) {
 }
 
 /** One card on its own canvas. */
-export function drawCard(recap, key, { handle = '' } = {}) {
+export function drawCard(recap, key, { handle = '', theme = 'light' } = {}) {
+  C = theme === 'dark' ? DARK : LIGHT;
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
@@ -370,6 +388,7 @@ function toBlob(canvas) {
  * the screen shows and what the share sheet is handed, so what is
  * posted is exactly what was looked at.
  */
+// Cards are drawn one after another, so the palette set by drawCard holds for each.
 export async function drawRecapCards(recap, options = {}) {
   await loadFonts();
   const slug = String(recap.player || 'ledger').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');

@@ -1232,3 +1232,4 @@ button.stand-row {
 .recap-card img,
 .recap-blank { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; border: 1px solid var(--rule-soft); background: #f7f4ec; }
 .recap-card figcaption { margin-top: 6px; font-size: 13px; line-height: 1.45; color: var(--text-2); }
+.recap-blank.dark { background: #141816; }

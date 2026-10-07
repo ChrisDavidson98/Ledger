@@ -509,6 +509,11 @@ export function recapHandle() {
   return String(getPrefs().recapHandle || '').trim();
 }
 
+/** Monthly recap cards on light paper (default) or the app's dark theme. */
+export function recapTheme() {
+  return getPrefs().recapTheme === 'dark' ? 'dark' : 'light';
+}
+
 /* --- Backup / restore ------------------------------------------- */
 
 /** Everything, as one JSON blob — insurance until the Sheet backend lands. */

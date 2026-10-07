@@ -211,7 +211,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-10-07a';
+const BUILD = '2026-10-07b';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -4575,12 +4575,13 @@ let monthlyCards = { key: null, cards: null, error: null };
  * so the first render shows blanks and this re-renders when it is done.
  */
 function monthlyImages(recap) {
-  const key = JSON.stringify([recap, store.recapHandle()]);
+  const options = { handle: store.recapHandle(), theme: store.recapTheme() };
+  const key = JSON.stringify([recap, options]);
   if (monthlyCards.key === key) return monthlyCards;
   (monthlyCards.cards || []).forEach((card) => URL.revokeObjectURL(card.url));
   const entry = { key, cards: null, error: null };
   monthlyCards = entry;
-  drawRecapCards(recap, { handle: store.recapHandle() })
+  drawRecapCards(recap, options)
     .then((cards) => { entry.cards = cards.map((card) => ({ ...card, url: URL.createObjectURL(card.blob) })); })
     .catch((err) => { entry.error = err.message; })
     .finally(() => { if (monthlyCards === entry && STATE.screen === 'monthly') render(); });
@@ -4626,6 +4627,10 @@ function screenMonthly() {
       </div>
       <button class="btn-flag" data-action="share-monthly" ${images.cards && !STATE.monthlyBusy ? '' : 'disabled'}>${
         images.cards ? `Share ${images.cards.length} Card${images.cards.length === 1 ? '' : 's'}` : 'Drawing…'}</button>
+      <div class="seg" style="margin-top:10px">
+        ${[['light', 'Light cards'], ['dark', 'Dark cards']].map(([key, label]) => `
+          <button class="${store.recapTheme() === key ? 'active' : ''}" data-action="recap-theme" data-theme="${key}">${label}</button>`).join('')}
+      </div>
       <p class="tiny">Each card is a 1080 &times; 1350 image. Sharing hands them all to the phone at once, to save to Photos or post.</p>
       ${images.error ? `<div class="err-box">Could not draw the cards: ${esc(images.error)}</div>` : ''}
     </div>
@@ -4636,7 +4641,7 @@ function screenMonthly() {
       return `<figure class="recap-card">
         ${card
           ? `<img src="${card.url}" width="1080" height="1350" alt="${esc(`${card.label}. ${caption}`)}">`
-          : '<div class="recap-blank" aria-hidden="true"></div>'}
+          : `<div class="recap-blank${store.recapTheme() === 'dark' ? ' dark' : ''}" aria-hidden="true"></div>`}
         <figcaption>${esc(caption)}</figcaption>
       </figure>`;
     }).join('')}
@@ -5485,6 +5490,10 @@ const ACTIONS = {
   'recap-player': (el) => {
     STATE.recapPlayer = el.getAttribute('data-player');
     STATE.recapMonth = null;
+    render();
+  },
+  'recap-theme': (el) => {
+    store.setPref('recapTheme', el.getAttribute('data-theme'));
     render();
   },
   'save-focus': () => {

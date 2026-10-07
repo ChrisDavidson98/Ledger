@@ -148,7 +148,7 @@ post: a cover, strokes gained per 18, the biggest leak and the strength opened
 up by distance, penalties, the change since the last month played, and a focus
 for next month in the player's own words. The leak and the strength are picked
 by the data, never from a category with fewer than five shots. Shots that look
-like mis-entries are left out and counted on the cover. Everything is computed
+like mis-entries are left out. The cards come light or dark. Everything is computed
 on read against the benchmark in force; the focus note is the only thing
 stored, in the `recap_notes` tab.
 
