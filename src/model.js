@@ -362,6 +362,24 @@ export function implausibleShot(start, end) {
 }
 
 /**
+ * True when a logged shot is more likely a mis-entry than a golf shot,
+ * for views that would rather leave a doubtful row out than build a
+ * finding on it. Everything implausibleShot() doubts, plus a shot from
+ * inside 100 yards that finished further from the hole than it began.
+ *
+ * A penalty is the exception to the second rule: a chip into the water
+ * and a drop further back is exactly what happened.
+ */
+export function flaggedShot(shot) {
+  const end = { lie: shot.holed ? 'holed' : shot.endLie, dist: shot.endDist };
+  if (implausibleShot({ lie: shot.startLie, dist: shot.startDist }, end).length) return true;
+  if (shot.holed || shot.penalty) return false;
+  const yards = (lie, dist) => (unitForLie(lie) === 'ft' ? Number(dist) / 3 : Number(dist));
+  const startY = yards(shot.startLie, shot.startDist);
+  return startY < 100 && yards(shot.endLie, shot.endDist) > startY;
+}
+
+/**
  * Distances grouped into bins, for drawing the shape of a club rather
  * than just its ends. Small samples produce a sparse chart, which is
  * the honest picture of a small sample.

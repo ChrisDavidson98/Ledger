@@ -13,12 +13,12 @@ import {
   roundScore, roundToPar, isScoreOnly,
 } from './model.js';
 
-const W = 1080;
-const H = 1350;
+export const W = 1080;
+export const H = 1350;
 
 /* The yardage-book light palette. Always light: an image lives on in
    other people's chats long after this phone's theme is known. */
-const C = {
+export const C = {
   paper: '#f7f4ec',
   grid: '#ece7da',
   ink: '#16150f',
@@ -88,7 +88,7 @@ function fmtDay(value) {
 }
 
 /** Fits text to a width by shrinking it, never by cutting a course name off. */
-function fitFont(ctx, text, style, size, family, maxWidth) {
+export function fitFont(ctx, text, style, size, family, maxWidth) {
   let s = size;
   ctx.font = `${style} ${s}px ${family}`;
   while (s > 24 && ctx.measureText(text).width > maxWidth) {
@@ -97,12 +97,12 @@ function fitFont(ctx, text, style, size, family, maxWidth) {
   }
 }
 
-const SERIF = '"Instrument Serif", Georgia, serif';
-const MONO = '"Martian Mono", ui-monospace, monospace';
-const SANS = '"Public Sans", -apple-system, sans-serif';
+export const SERIF = '"Instrument Serif", Georgia, serif';
+export const MONO = '"Martian Mono", ui-monospace, monospace';
+export const SANS = '"Public Sans", -apple-system, sans-serif';
 
 /** Small mono capitals, spaced out: the yardage-book label. */
-function eyebrow(ctx, text, x, y, colour = C.soft, align = 'left', size = 22) {
+export function eyebrow(ctx, text, x, y, colour = C.soft, align = 'left', size = 22) {
   ctx.save();
   ctx.font = `500 ${size}px ${MONO}`;
   ctx.fillStyle = colour;
@@ -112,15 +112,15 @@ function eyebrow(ctx, text, x, y, colour = C.soft, align = 'left', size = 22) {
   ctx.restore();
 }
 
-function rule(ctx, y, colour, width = 2) {
+export function rule(ctx, y, colour, width = 2) {
   ctx.fillStyle = colour;
   ctx.fillRect(PAD, y, W - PAD * 2, width);
 }
 
-const PAD = 72;
+export const PAD = 72;
 
 /** The typefaces are web fonts; a canvas draws with a fallback unless they are loaded first. */
-async function loadFonts() {
+export async function loadFonts() {
   if (!document.fonts || !document.fonts.load) return;
   try {
     await Promise.all([
@@ -273,24 +273,34 @@ export async function drawRecap(data, { benchLabel = 'tour' } = {}) {
  * Hands the image to the phone's share sheet, or saves it where there
  * is no share sheet (a laptop). Resolves to what happened.
  */
-export async function shareRecap(blob, filename, title) {
-  const file = new File([blob], filename, { type: 'image/png' });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+export function shareRecap(blob, filename, title) {
+  return shareImages([{ blob, filename }], title);
+}
+
+/** The same for several images at once, attached to one share. */
+export async function shareImages(images, title) {
+  const files = images.map((i) => new File([i.blob], i.filename, { type: 'image/png' }));
+  if (navigator.canShare && navigator.canShare({ files })) {
     try {
-      await navigator.share({ files: [file], title });
+      await navigator.share({ files, title });
       return 'shared';
     } catch (err) {
       if (err && err.name === 'AbortError') return 'cancelled';
-      // Fall through to saving it.
+      // Fall through to saving them.
     }
   }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  images.forEach(({ blob, filename }, i) => {
+    // Spaced out, or a browser keeps the first download and drops the rest.
+    setTimeout(() => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, i * 250);
+  });
   return 'saved';
 }

@@ -39,6 +39,7 @@ import * as E from './src/brief.js';
 import * as SCH from './src/schedule.js';
 import * as CH from './src/charts.js';
 import * as RC from './src/recap.js';
+import * as MO from './src/monthly.js';
 import * as PR from './src/practice.js';
 import * as STD from './src/standings.js';
 import * as AV from './src/avatars.js';
@@ -1788,6 +1789,172 @@ check('every seeded course passes without a warning', () => {
     });
   });
   return noisy.length ? noisy.slice(0, 3).join(' | ') : null;
+});
+
+/* --- Monthly recap ------------------------------------------------- */
+
+suite('Monthly recap');
+
+/** A medium round on a given local day, for whoever is asked for. */
+function roundOn(year, month, day, player = 'Test', build = mediumRound) {
+  const r = build();
+  r.id = `r_${player}_${year}_${month}_${day}`;
+  r.player = player;
+  r.date = new Date(year, month - 1, day, 9, 0).toISOString();
+  return r;
+}
+
+const SEPT = [roundOn(2026, 9, 5), roundOn(2026, 9, 19)];
+
+check('a month reads the same per 18 as its round logs, on any benchmark', () => {
+  const problems = [];
+  ['tour', 10, 20].forEach((bm) => {
+    const recap = MO.buildRecap(SEPT, 'Test', '2026-09', bm);
+    const holes = SEPT.reduce((n, r) => n + M.playedHoles(r).length, 0);
+    ['ott', 'app', 'arg', 'putt', 'total'].forEach((c) => {
+      const want = (SEPT.reduce((s, r) => s + M.roundTotals(r, bm)[c], 0) / holes) * 18;
+      if (!near(recap.sg.per18[c], want, 1e-9)) problems.push(`${bm} ${c}: ${recap.sg.per18[c]} not ${want}`);
+    });
+  });
+  return problems.join('; ') || null;
+});
+
+check('only this player, and only rounds dated inside the month in local time', () => {
+  const lateSept = roundOn(2026, 9, 30);
+  lateSept.date = new Date(2026, 8, 30, 23, 30).toISOString();
+  const earlyOct = roundOn(2026, 10, 1);
+  earlyOct.date = new Date(2026, 9, 1, 0, 30).toISOString();
+  const all = [...SEPT, lateSept, earlyOct, roundOn(2026, 9, 12, 'Manny'), roundOn(2026, 8, 20)];
+  const recap = MO.buildRecap(all, 'Test', '2026-09');
+  if (recap.cover.rounds !== 3) return `${recap.cover.rounds} rounds in September`;
+  const manny = MO.buildRecap(all, 'Manny', '2026-09');
+  if (manny.cover.rounds !== 1 || manny.player !== 'Manny') return 'Manny picked up somebody else\'s rounds';
+  if (MO.monthOf('2026-09-01') !== '2026-09') return 'a bare day key slipped a month';
+  return eq(MO.recapMonths(all, 'Test').join(), '2026-10,2026-09,2026-08', 'months');
+});
+
+check('a short round counts by its holes, not as a round', () => {
+  const one = MO.buildRecap([SEPT[0]], 'Test', '2026-09');
+  const two = MO.buildRecap(SEPT, 'Test', '2026-09');
+  if (two.cover.holes !== 8) return `${two.cover.holes} holes`;
+  return near(one.sg.per18.total, two.sg.per18.total, 1e-9) ? null : 'per 18 moved with the number of rounds';
+});
+
+check('a category under five shots is greyed and never the leak or the strength', () => {
+  const recap = MO.buildRecap(SEPT, 'Test', '2026-09');
+  if (!recap.sg.thin.arg || recap.sg.shots.arg !== 2) return `short game: ${recap.sg.shots.arg} shots, thin ${recap.sg.thin.arg}`;
+  if (recap.leak.key === 'arg' || recap.strength.key === 'arg') return 'picked the thin category';
+  if (recap.leak.key === recap.strength.key) return 'leak and strength are the same category';
+  const eligible = ['ott', 'app', 'putt'];
+  const low = Math.min(...eligible.map((c) => recap.sg.per18[c]));
+  const high = Math.max(...eligible.map((c) => recap.sg.per18[c]));
+  if (recap.sg.per18[recap.leak.key] !== low) return 'leak is not the lowest';
+  return recap.sg.per18[recap.strength.key] === high ? null : 'strength is not the highest';
+});
+
+check('a shot that looks like a mis-entry is left out and counted', () => {
+  const odd = roundOn(2026, 9, 25, 'Test', () => roundOf([
+    { par: 4, yards: 380, shots: [
+      shot('tee', 380, 'fairway', 60),
+      shot('fairway', 60, 'rough', 85),
+      shot('rough', 85, 'green', 10),
+      shot('green', 10, null, null, { holed: true })] },
+  ]));
+  const recap = MO.buildRecap([odd], 'Test', '2026-09');
+  if (recap.cover.skipped !== 1) return `${recap.cover.skipped} skipped`;
+  const hole = odd.holes[0];
+  const kept = hole.shots.filter((s, i) => i !== 1).reduce((s, sh) => s + M.shotSG(sh, 4).sg, 0);
+  if (!near(recap.sg.per18.total, kept * 18, 1e-9)) return 'the skipped shot still counted';
+  const dropped = shot('rough', 20, 'rough', 45, { penalty: 1 });
+  return M.flaggedShot(dropped) ? 'a penalty drop further back was flagged' : null;
+});
+
+check('putting says made X of Y, and every putt is in a band', () => {
+  const recap = MO.buildRecap(SEPT, 'Test', '2026-09');
+  const putting = [recap.leak, recap.strength].find((c) => c.key === 'putt')
+    || MO.buildRecap(SEPT, 'Test', '2026-09', 20).leak;
+  if (!putting || putting.key !== 'putt') return null; // not opened on this fixture
+  if (!putting.rows.every((r) => /^Made \d+ of \d+$/.test(r.text))) return putting.rows.map((r) => r.text).join(' | ');
+  const n = putting.rows.reduce((s, r) => s + r.n, 0);
+  return eq(n, recap.sg.shots.putt, 'putts in bands');
+});
+
+check('the opened category\'s rows add back up to it', () => {
+  const recap = MO.buildRecap(SEPT, 'Test', '2026-09');
+  return [recap.leak, recap.strength].map((c) => {
+    const sum = (c.rows.reduce((s, r) => s + r.sg, 0) / recap.sg.holes) * 18;
+    return near(sum, c.per18, 1e-9) ? null : `${c.key}: rows ${sum} not ${c.per18}`;
+  }).filter(Boolean).join('; ') || null;
+});
+
+check('the best shot is the highest single strokes gained, the later one on a tie', () => {
+  const recap = MO.buildRecap(SEPT, 'Test', '2026-09');
+  const best = recap.strength.bestShot;
+  let top = -Infinity;
+  SEPT[0].holes.forEach((h) => h.shots.forEach((s) => { top = Math.max(top, M.shotSG(s, h.par).sg); }));
+  if (!near(best.sg, top, 1e-9)) return `best ${best.sg}, expected ${top}`;
+  return eq(best.date, SEPT[1].date, 'date of the tied best shot');
+});
+
+check('penalties get a card only when there were some, and tee shots are re-read without them', () => {
+  if (MO.buildRecap(SEPT, 'Test', '2026-09').cards.includes('penalties')) return 'penalty card with no penalties';
+  const wet = roundOn(2026, 9, 26, 'Test', () => roundOf([
+    { par: 4, yards: 400, shots: [
+      shot('tee', 400, 'rough', 180, { penalty: 1 }),
+      shot('rough', 180, 'green', 20),
+      shot('green', 20, 'green', 2),
+      shot('green', 2, null, null, { holed: true })] },
+    { par: 4, yards: 380, shots: [
+      shot('tee', 380, 'fairway', 140),
+      shot('fairway', 140, 'green', 15),
+      shot('green', 15, null, null, { holed: true })] },
+  ]));
+  const p = MO.buildRecap([wet], 'Test', '2026-09').penalties;
+  if (!p || p.count !== 1 || p.strokes !== 1 || p.ottCount !== 1) return JSON.stringify(p);
+  const teeSG = (i) => M.shotSG(wet.holes[i].shots[0], 4).sg;
+  if (!near(p.sgCost, teeSG(0), 1e-9)) return `cost ${p.sgCost}`;
+  if (!near(p.ottPer18, (teeSG(0) + teeSG(1)) * 9, 1e-9)) return `tee per 18 ${p.ottPer18}`;
+  return near(p.ottCleanPer18, teeSG(1) * 9, 1e-9) ? null : `clean tee per 18 ${p.ottCleanPer18}`;
+});
+
+check('month over month is skipped in a first month and compares with the last month played', () => {
+  if (MO.buildRecap(SEPT, 'Test', '2026-09').cards.includes('mom')) return 'compared a first month with nothing';
+  const all = [...SEPT, roundOn(2026, 6, 10), roundOn(2026, 5, 3)];
+  const mom = MO.buildRecap(all, 'Test', '2026-09').mom;
+  if (!mom || mom.month !== '2026-06') return `compared with ${mom && mom.month}`;
+  // The same round played in both months: nothing can have moved.
+  if (!mom.rows.every((r) => near(r.delta, 0, 1e-9)) || !near(mom.total.delta, 0, 1e-9)) return 'identical months differ';
+  return /within a tenth/.test(mom.caption) ? null : mom.caption;
+});
+
+check('focus is the player\'s own words, and the card is skipped when there are none', () => {
+  if (MO.buildRecap(SEPT, 'Test', '2026-09', 'tour', { notes: { practice: '  ', rule: '' } }).cards.includes('focus')) return 'empty focus card';
+  const recap = MO.buildRecap(SEPT, 'Test', '2026-09', 'tour', { notes: { practice: ' Lag putting ', rule: 'Hybrid off 7' } });
+  if (recap.focus.practice !== 'Lag putting' || recap.focus.forMonth !== 'October') return JSON.stringify(recap.focus);
+  return eq(recap.cards.join(), 'cover,sg,leak,strength,focus', 'cards');
+});
+
+check('changing the benchmark moves the figures and never touches the rounds', () => {
+  const before = JSON.stringify(SEPT);
+  const tour = MO.buildRecap(SEPT, 'Test', '2026-09', 'tour');
+  const twenty = MO.buildRecap(SEPT, 'Test', '2026-09', 20, { benchLabel: 'a 20 handicap' });
+  if (JSON.stringify(SEPT) !== before) return 'building a recap changed the rounds';
+  if (!(twenty.sg.per18.total > tour.sg.per18.total)) return 'a 20 handicap is not an easier standard than tour';
+  if (!['ott', 'app', 'arg', 'putt'].every((c) => twenty.sg.per18[c] !== tour.sg.per18[c])) return 'a category ignored the benchmark';
+  return /a 20 handicap/.test(twenty.captions.sg) ? null : twenty.captions.sg;
+});
+
+check('every card has one plain sentence, and a score-only month is a cover and nothing else', () => {
+  const all = [...SEPT, roundOn(2026, 6, 10)];
+  const recap = MO.buildRecap(all, 'Test', '2026-09', 'tour', { notes: { practice: 'Lag putting' } });
+  const bad = recap.cards.filter((c) => !/^[A-Z0-9].*\.$/.test(recap.captions[c] || ''));
+  if (bad.length) return `no sentence for ${bad.join(', ')}`;
+  if (!/per 18/.test(recap.captions.leak)) return recap.captions.leak;
+  const card = roundOn(2026, 9, 2, 'Test', () => roundOf([{ par: 4, score: 5 }, { par: 3, score: 3 }], 'score'));
+  const scoreOnly = MO.buildRecap([card], 'Test', '2026-09');
+  if (scoreOnly.sg !== null || scoreOnly.cards.join() !== 'cover') return `cards: ${scoreOnly.cards.join()}`;
+  if (!near(scoreOnly.cover.toParPer18, 9)) return `to par per 18: ${scoreOnly.cover.toParPer18}`;
+  return MO.buildRecap(all, 'Test', '2026-07').empty ? null : 'a month with no rounds was not empty';
 });
 
 /* --- Render ----------------------------------------------------- */
