@@ -211,7 +211,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-10-07c';
+const BUILD = '2026-10-07d';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -1335,8 +1335,13 @@ function screenSettings() {
     </div>
 
     <div class="card">
-      <h2>Monthly recap</h2>
-      <label for="recapHandle">Handle on the cards</label>
+      <h2>Recap images</h2>
+      <div class="chip-grid g2">
+        ${[['light', 'Light'], ['dark', 'Dark']].map(([key, label]) => `
+          <button class="chip ${store.recapTheme() === key ? 'active' : ''}" data-action="recap-theme" data-theme="${key}">${label}</button>`).join('')}
+      </div>
+      <p class="tiny">How a shared image is drawn, for a round's Share Recap and for the monthly cards alike. It does not follow the app's own theme, because the image ends up on other people's phones.</p>
+      <label for="recapHandle">Handle on the monthly cards</label>
       <input type="text" id="recapHandle" maxlength="40" placeholder="@yourname" autocapitalize="off" autocorrect="off" value="${esc(store.recapHandle())}">
       <p class="tiny">Printed at the foot of each monthly recap card, for when one gets posted. Leave it blank and the cards carry your name and the month only.</p>
     </div>
@@ -5538,7 +5543,7 @@ const ACTIONS = {
     STATE.recapBusy = true;
     render();
     try {
-      const blob = await drawRecap(recapData(round, bench()), { benchLabel: benchName() });
+      const blob = await drawRecap(recapData(round, bench()), { benchLabel: benchName(), theme: store.recapTheme() });
       const slug = String(round.courseName || 'round').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const outcome = await shareRecap(blob, `${slug}-${String(round.date).slice(0, 10)}.png`, round.courseName);
       STATE.notice = outcome === 'saved' ? 'Recap image saved.' : '';

@@ -3,8 +3,8 @@
 
    Drawn on a canvas on the phone rather than rendered anywhere else,
    so it works in the car park with no signal, which is exactly when
-   somebody wants to send it. Always the light palette: an image lives
-   on in other people's chats long after this phone's theme is known.
+   somebody wants to send it. Light paper unless the phone asks for dark:
+   the image outlives this phone's theme, so it is a choice, not a mirror.
 --------------------------------------------------------------- */
 
 import { CATEGORIES, CATEGORY_LABELS } from './baseline.js';
@@ -16,7 +16,7 @@ import {
 export const W = 1080;
 export const H = 1350;
 
-/* The yardage-book light palette. Always light: an image lives on in
+/* The yardage-book light palette, and the default: an image lives on in
    other people's chats long after this phone's theme is known. */
 export const C = {
   paper: '#f7f4ec',
@@ -27,6 +27,19 @@ export const C = {
   rule: '#d9d3c3',
   gain: '#1f5fbf',
   loss: '#b8431b',
+};
+
+/* The app's dark theme, for anyone who would rather send that. Paper
+   stays the default; which one is a choice made per phone. */
+export const DARK = {
+  paper: '#141816',
+  grid: '#191e1c',
+  ink: '#e8eae7',
+  soft: '#a4ada8',
+  faint: '#79837e',
+  rule: '#2e3833',
+  gain: '#7fc39b',
+  loss: '#e8785a',
 };
 
 /**
@@ -134,7 +147,8 @@ export async function loadFonts() {
 }
 
 /** Draws the recap and resolves to a PNG blob. */
-export async function drawRecap(data, { benchLabel = 'tour' } = {}) {
+export async function drawRecap(data, { benchLabel = 'tour', theme = 'light' } = {}) {
+  const P = theme === 'dark' ? DARK : C;
   await loadFonts();
 
   const canvas = document.createElement('canvas');
@@ -144,50 +158,50 @@ export async function drawRecap(data, { benchLabel = 'tour' } = {}) {
   ctx.textBaseline = 'alphabetic';
 
   // Paper and its faint grid.
-  ctx.fillStyle = C.paper;
+  ctx.fillStyle = P.paper;
   ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = C.grid;
+  ctx.fillStyle = P.grid;
   for (let x = 0; x < W; x += 36) ctx.fillRect(x, 0, 2, H);
   for (let y = 0; y < H; y += 36) ctx.fillRect(0, y, W, 2);
 
   // Masthead.
-  ctx.fillStyle = C.ink;
+  ctx.fillStyle = P.ink;
   ctx.font = `400 88px ${SERIF}`;
   ctx.fillText('Ledger', PAD, 132);
   const word = ctx.measureText('Ledger').width;
-  ctx.fillStyle = C.loss;
+  ctx.fillStyle = P.loss;
   ctx.fillText('.', PAD + word, 132);
-  eyebrow(ctx, `${data.player || ''} · ${fmtDay(data.date)}`, W - PAD, 124, C.soft, 'right');
-  rule(ctx, 162, C.ink, 4);
+  eyebrow(ctx, `${data.player || ''} · ${fmtDay(data.date)}`, W - PAD, 124, P.soft, 'right');
+  rule(ctx, 162, P.ink, 4);
 
   // The round.
-  eyebrow(ctx, [data.tee ? `${data.tee} tees` : '', `${data.holes} holes`].filter(Boolean).join(' · '), PAD, 228);
-  ctx.fillStyle = C.ink;
+  eyebrow(ctx, [data.tee ? `${data.tee} tees` : '', `${data.holes} holes`].filter(Boolean).join(' · '), PAD, 228, P.soft);
+  ctx.fillStyle = P.ink;
   fitFont(ctx, data.course || 'Round', '400', 92, SERIF, W - PAD * 2);
   ctx.fillText(data.course || 'Round', PAD, 318);
 
   // Score, and strokes gained beside it.
   const scoreY = 560;
-  ctx.fillStyle = C.ink;
+  ctx.fillStyle = P.ink;
   ctx.font = `400 250px ${SERIF}`;
   ctx.fillText(String(data.score), PAD - 6, scoreY);
   const scoreW = ctx.measureText(String(data.score)).width;
   ctx.font = `italic 400 96px ${SERIF}`;
-  ctx.fillStyle = data.toPar <= 0 ? C.gain : C.ink;
+  ctx.fillStyle = data.toPar <= 0 ? P.gain : P.ink;
   ctx.fillText(fmtToPar(data.toPar), PAD + scoreW + 20, scoreY);
 
   if (data.total != null) {
-    eyebrow(ctx, 'Strokes gained', W - PAD, scoreY - 150, C.soft, 'right');
+    eyebrow(ctx, 'Strokes gained', W - PAD, scoreY - 150, P.soft, 'right');
     ctx.textAlign = 'right';
     ctx.font = `400 120px ${SERIF}`;
-    ctx.fillStyle = data.total >= 0 ? C.gain : C.loss;
+    ctx.fillStyle = data.total >= 0 ? P.gain : P.loss;
     ctx.fillText(fmtSG(data.total), W - PAD, scoreY - 20);
     ctx.textAlign = 'left';
-    eyebrow(ctx, `vs ${benchLabel}`, W - PAD, scoreY + 22, C.faint, 'right', 20);
+    eyebrow(ctx, `vs ${benchLabel}`, W - PAD, scoreY + 22, P.faint, 'right', 20);
   }
 
   let y = scoreY + 70;
-  rule(ctx, y, C.ink, 3);
+  rule(ctx, y, P.ink, 3);
 
   if (data.categories.length) {
     // Four ruled rows, each with a bar off a shared zero.
@@ -203,15 +217,15 @@ export async function drawRecap(data, { benchLabel = 'tour' } = {}) {
     data.categories.forEach((c, i) => {
       const top = y + i * rowH;
       const mid = top + rowH / 2;
-      ctx.fillStyle = C.ink;
+      ctx.fillStyle = P.ink;
       ctx.font = `500 34px ${SANS}`;
       ctx.textBaseline = 'middle';
       ctx.fillText(c.label, PAD, mid);
 
-      ctx.fillStyle = C.rule;
+      ctx.fillStyle = P.rule;
       ctx.fillRect(zeroX - 1, top + 18, 2, rowH - 36);
       const len = (Math.abs(c.sg) / scale) * half;
-      ctx.fillStyle = c.sg >= 0 ? C.gain : C.loss;
+      ctx.fillStyle = c.sg >= 0 ? P.gain : P.loss;
       ctx.fillRect(c.sg >= 0 ? zeroX : zeroX - len, mid - 9, Math.max(len, 3), 18);
 
       ctx.textAlign = 'right';
@@ -219,28 +233,28 @@ export async function drawRecap(data, { benchLabel = 'tour' } = {}) {
       ctx.fillText(fmtSG(c.sg), W - PAD, mid);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
-      rule(ctx, top + rowH, C.rule, 2);
+      rule(ctx, top + rowH, P.rule, 2);
     });
     y += rowH * data.categories.length;
   } else {
-    ctx.fillStyle = C.soft;
+    ctx.fillStyle = P.soft;
     ctx.font = `italic 400 44px ${SERIF}`;
     ctx.fillText('Score only — no shots logged for this one.', PAD, y + 80);
     y += 130;
-    rule(ctx, y, C.rule, 2);
+    rule(ctx, y, P.rule, 2);
   }
 
   // Best and toughest hole, as two more ruled rows.
   if (data.best && data.worst) {
     y += 20;
-    [['Best hole', data.best, C.gain], ['Toughest hole', data.worst, C.loss]].forEach(([title, hole, colour], i) => {
+    [['Best hole', data.best, P.gain], ['Toughest hole', data.worst, P.loss]].forEach(([title, hole, colour], i) => {
       const top = y + i * 104;
       const mid = top + 58;
-      eyebrow(ctx, title, PAD, mid + 8);
-      ctx.fillStyle = C.ink;
+      eyebrow(ctx, title, PAD, mid + 8, P.soft);
+      ctx.fillStyle = P.ink;
       ctx.font = `400 64px ${SERIF}`;
       ctx.fillText(`No. ${hole.hole}`, PAD + 330, mid + 20);
-      eyebrow(ctx, `Par ${hole.par} · ${hole.score}`, PAD + 580, mid + 8);
+      eyebrow(ctx, `Par ${hole.par} · ${hole.score}`, PAD + 580, mid + 8, P.soft);
       if (hole.sg != null) {
         ctx.textAlign = 'right';
         ctx.font = `600 34px ${MONO}`;
@@ -248,14 +262,14 @@ export async function drawRecap(data, { benchLabel = 'tour' } = {}) {
         ctx.fillText(fmtSG(hole.sg), W - PAD, mid + 10);
         ctx.textAlign = 'left';
       }
-      rule(ctx, top + 104, C.rule, 2);
+      rule(ctx, top + 104, P.rule, 2);
     });
   }
 
   // Footer.
-  rule(ctx, H - 110, C.ink, 3);
-  eyebrow(ctx, 'Ledger · strokes gained', PAD, H - 58, C.soft);
-  ctx.fillStyle = C.loss;
+  rule(ctx, H - 110, P.ink, 3);
+  eyebrow(ctx, 'Ledger · strokes gained', PAD, H - 58, P.soft);
+  ctx.fillStyle = P.loss;
   ctx.fillRect(W - PAD - 26, H - 92, 4, 44);
   ctx.beginPath();
   ctx.moveTo(W - PAD - 22, H - 92);

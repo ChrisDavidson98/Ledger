@@ -10,22 +10,9 @@
 
 import { CATEGORIES, CATEGORY_LABELS } from './baseline.js';
 import {
-  C as LIGHT, W, H, PAD, SERIF, MONO, SANS, eyebrow as paperEyebrow, rule, fitFont, loadFonts, fmtSG,
+  C as LIGHT, DARK, W, H, PAD, SERIF, MONO, SANS, eyebrow as paperEyebrow, rule, fitFont, loadFonts, fmtSG,
 } from './recap.js';
 import { signed } from './monthly.js';
-
-/* The app's dark theme, for anyone who would rather post that. The
-   round recap stays on paper; this is a choice made per phone. */
-const DARK = {
-  paper: '#141816',
-  grid: '#191e1c',
-  ink: '#e8eae7',
-  soft: '#a4ada8',
-  faint: '#79837e',
-  rule: '#2e3833',
-  gain: '#7fc39b',
-  loss: '#e8785a',
-};
 
 let C = LIGHT;
 
