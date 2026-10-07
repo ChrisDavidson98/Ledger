@@ -200,9 +200,11 @@ const CARDS = {
     ];
     if (sg) rows.push(['Strokes gained, per 18', signed(sg.per18.total), tone(sg.per18.total), `over ${sg.holes} holes with shots`]);
     rows.push(['Measured against', recap.benchLabel, C.ink, '']);
+    if (cover.playsLike) rows.push(['Plays like', cover.playsLike, C.ink, 'handicap · recent rounds']);
+    const rowH = rows.length > 5 ? 90 : 104;
     rows.forEach(([name, value, colour, sub]) => {
-      ruledRow(ctx, y, 104, name, value, colour, sub);
-      y += 104;
+      ruledRow(ctx, y, rowH, name, value, colour, sub);
+      y += rowH;
     });
 
     block(ctx, recap.captions.cover, y + 84, { size: 46, style: 'italic 400', colour: C.soft, maxLines: 2 });

@@ -312,9 +312,10 @@ function monthOverMonth(now, prev, prevMonth) {
  * `rounds` is every round on the device; only `player`'s rounds dated
  * inside `month` ('YYYY-MM') are read, so nobody's recap can pick up
  * anybody else's rows. `notes` is the player's own focus for next
- * month, the one part that is typed rather than measured.
+ * month, the one part that is typed rather than measured. `playsLike`
+ * is the handicap the app already shows for this player, or null.
  */
-export function buildRecap(rounds, player, month, benchmark = 'tour', { benchLabel = 'tour', notes = null } = {}) {
+export function buildRecap(rounds, player, month, benchmark = 'tour', { benchLabel = 'tour', notes = null, playsLike = null } = {}) {
   const mine = rounds.filter((r) => r.player === player && playedHoles(r).length);
   const inMonth = mine.filter((r) => monthOf(r.date) === month);
   const base = { player, month, monthLabel: monthName(month), benchmark, benchLabel };
@@ -333,6 +334,8 @@ export function buildRecap(rounds, player, month, benchmark = 'tour', { benchLab
     sgHoles: totals.holes,
     toParPer18,
     skipped: totals.skipped,
+    // The app's own handicap figure, handed in so the card and the app agree.
+    playsLike,
   };
   const captions = {
     cover: `${plural(inMonth.length, 'round')} and ${plural(holes, 'hole')}, averaging ${

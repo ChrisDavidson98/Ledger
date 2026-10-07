@@ -211,7 +211,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-10-07b';
+const BUILD = '2026-10-07c';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -4549,11 +4549,18 @@ function monthlyContext() {
   return { all, players, player, months, month };
 }
 
+/** The same "plays like" figure Home shows for this player, or null before there is one. */
+function recapPlaysLike(ctx) {
+  const game = gameProfile(ctx.all.filter((r) => r.player === ctx.player));
+  return game ? fmtHandicap(game.profile.overall) : null;
+}
+
 function monthlyRecap(ctx) {
   const { key, label } = recapBench(ctx.player);
   return buildRecap(ctx.all, ctx.player, ctx.month, key, {
     benchLabel: label,
     notes: store.getRecapNote(ctx.player, ctx.month),
+    playsLike: recapPlaysLike(ctx),
   });
 }
 
