@@ -1957,6 +1957,14 @@ check('every card has one plain sentence, and a score-only month is a cover and 
   return MO.buildRecap(all, 'Test', '2026-07').empty ? null : 'a month with no rounds was not empty';
 });
 
+check('a focus note survives the sheet, even when Sheets has turned its month into a date', () => {
+  const note = { player: 'Chris', month: '2026-09', practice: 'Lag putting', rule: 'Hybrid off 7', updatedAt: '2026-10-01T10:00:00.000Z' };
+  const row = S.flattenRecapNote(note);
+  if (Object.keys(row).join() !== 'player,month,practice_item,course_rule,updated_at') return Object.keys(row).join();
+  if (JSON.stringify(S.rebuildRecapNote(row)) !== JSON.stringify(note)) return 'round trip changed the note';
+  return eq(S.rebuildRecapNote({ ...row, month: new Date(2026, 8, 1) }).month, '2026-09', 'month from a Date');
+});
+
 /* --- Render ----------------------------------------------------- */
 
 const byGroup = {};

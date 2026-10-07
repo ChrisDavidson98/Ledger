@@ -83,6 +83,9 @@ var SHEETS = {
     'course_id', 'course_name', 'city', 'nine_id', 'nine_name',
     'tee_name', 'hole', 'par', 'yards', 'verified', 'combos', 'updated_at',
   ],
+  // A player's focus for next month, from the monthly recap. One row
+  // per player per month; `month` is 'YYYY-MM', held as text.
+  recap_notes: ['player', 'month', 'practice_item', 'course_rule', 'updated_at'],
 };
 
 /*
@@ -104,7 +107,7 @@ SHEETS.shots_archive = SHEETS.shots.slice();
  * "that phone is pointed at an older deployment" is otherwise
  * invisible from the client.
  */
-var CONTRACT = 10;
+var CONTRACT = 11;
 
 /*
  * The oldest client this deployment will accept WRITES from.
@@ -145,6 +148,7 @@ var MIN_CLIENT = 0;
 var WRITE_ACTIONS = {
   pushRounds: true, deleteRounds: true, restoreRounds: true,
   cleanup: true, pushCourses: true, pushTeeTimes: true, pushPlayers: true,
+  pushRecapNotes: true,
 };
 
 function doGet(e) {
@@ -155,7 +159,8 @@ function doGet(e) {
     minClient: MIN_CLIENT,
     actions: ['ping', 'setup', 'pushRounds', 'deleteRounds', 'listArchive',
       'restoreRounds', 'cleanup', 'pullRounds', 'pushCourses', 'pullCourses',
-      'pushTeeTimes', 'pullTeeTimes', 'pushPlayers', 'pullPlayers'],
+      'pushTeeTimes', 'pullTeeTimes', 'pushPlayers', 'pullPlayers',
+      'pushRecapNotes', 'pullRecapNotes'],
   });
 }
 
@@ -207,6 +212,8 @@ function doPost(e) {
       case 'pullTeeTimes': return respond(pullTeeTimes());
       case 'pushPlayers':  return respond(pushPlayers(body.players || []));
       case 'pullPlayers':  return respond(pullPlayers());
+      case 'pushRecapNotes': return respond(pushRecapNotes(body.notes || []));
+      case 'pullRecapNotes': return respond(pullRecapNotes());
       default:
         return respond({ ok: false, error: 'Unknown action: ' + body.action });
     }
@@ -306,6 +313,7 @@ function migrateHeaders(sheet, name) {
 function setupSheets() {
   Object.keys(SHEETS).forEach(function (name) { sheetFor(name); });
   textColumns('tee_times', ['date', 'time']);
+  textColumns('recap_notes', ['month']);
   return { ok: true, sheets: Object.keys(SHEETS) };
 }
 
@@ -765,6 +773,44 @@ function pushPlayers(players) {
 
   replaceRows('players', 'player', names, rows);
   return { ok: true, written: rows.length };
+}
+
+/* --- Recap notes --------------------------------------------------- */
+
+/**
+ * Upsert by player and month together, touching only the rows named
+ * in the payload. `month` is pinned to text for the same reason a tee
+ * time's date is: "2026-09" left to Sheets becomes the 1st of
+ * September in the spreadsheet's timezone.
+ */
+function pushRecapNotes(notes) {
+  if (!notes.length) return { ok: true, written: 0 };
+
+  var keyOf = function (row) {
+    return String(row.player || '').trim().toLowerCase() + '|' + String(row.month || '').trim();
+  };
+  var now = new Date().toISOString();
+  var incoming = {};
+  notes.forEach(function (n) {
+    if (!String(n.player || '').trim() || !String(n.month || '').trim()) return;
+    n.updated_at = n.updated_at || now;
+    incoming[keyOf(n)] = n;
+  });
+
+  textColumns('recap_notes', ['month']);
+  var kept = readAll('recap_notes', ['month']).filter(function (row) {
+    return String(row.player || '') !== '' && !incoming[keyOf(row)];
+  });
+  var rows = kept.concat(Object.keys(incoming).map(function (k) { return incoming[k]; }));
+  writeAll('recap_notes', rows);
+  return { ok: true, written: Object.keys(incoming).length };
+}
+
+function pullRecapNotes() {
+  var rows = readAll('recap_notes', ['month']).filter(function (row) {
+    return String(row.player || '') !== '';
+  });
+  return { ok: true, notes: rows, serverTime: new Date().toISOString() };
 }
 
 /* --- Courses ----------------------------------------------------- */

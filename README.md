@@ -56,6 +56,9 @@ idempotent, and that the course warnings stay silent on every seeded card.
 | `src/charts.js` | Inline SVG chart primitives |
 | `src/repair.js` | Bringing rounds back in step with a corrected scorecard |
 | `src/brief.js` | Writing a round out as a briefing or a shots CSV |
+| `src/recap.js` | One round drawn as one image, and the share sheet |
+| `src/monthly.js` | A player's month worked out as one plain object (`buildRecap`) |
+| `src/monthcards.js` | That month drawn as 1080×1350 cards |
 | `src/sync.js` | Google Sheet sync — push, pull, delete, archive, setup links |
 | `src/app.js` | Screens, state, event wiring |
 | `sw.js` | Offline app shell |
@@ -139,6 +142,15 @@ distance, miss grids, and a hole-by-hole card that expands to every shot.
 **Stats** — the career view. Handicap level per part of the game with the upside
 of fixing the weakest, a trend line by round, the basics, club distributions and
 gapping, holes that cost you, and career bests.
+
+**Stats › Monthly recap** — one player's month as up to seven cards to save or
+post: a cover, strokes gained per 18, the biggest leak and the strength opened
+up by distance, penalties, the change since the last month played, and a focus
+for next month in the player's own words. The leak and the strength are picked
+by the data, never from a category with fewer than five shots. Shots that look
+like mis-entries are left out and counted on the cover. Everything is computed
+on read against the benchmark in force; the focus note is the only thing
+stored, in the `recap_notes` tab.
 
 **Diary** — a month of what is booked and what has already been played. Tee
 times, invitees, calendar export, and on the morning of a round a button that

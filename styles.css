@@ -1226,3 +1226,9 @@ button.stand-row {
 .app-bar-fill { position: absolute; top: 0; height: 8px; border-radius: 2px; }
 .app-bar-fill.lost { background: var(--loss); }
 .app-bar-fill.won { background: var(--gain); }
+
+/* --- Monthly recap: the cards as they will be shared ---------------- */
+.recap-card { margin: 14px 0 0; }
+.recap-card img,
+.recap-blank { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; border: 1px solid var(--rule-soft); background: #f7f4ec; }
+.recap-card figcaption { margin-top: 6px; font-size: 13px; line-height: 1.45; color: var(--text-2); }

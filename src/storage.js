@@ -25,6 +25,8 @@ const KEYS = {
   players: PREFIX + 'players',
   rosterSource: PREFIX + 'roster_source',
   seenInvites: PREFIX + 'seen_invites',
+  recapNotes: PREFIX + 'recap_notes',
+  recapNoteQueue: PREFIX + 'recap_note_queue',
 };
 
 function read(key, fallback) {
@@ -444,6 +446,69 @@ export function markTeeTimeSynced(id) {
   write(KEYS.teeTimeQueue, unsyncedTeeTimes().filter((x) => x !== id));
 }
 
+
+
+/* --- Recap notes --------------------------------------------------
+   The focus a player sets for next month: the one thing on a monthly
+   recap that is typed rather than measured. One per player per month,
+   keyed on both, last write wins. Only ever written by the player it
+   belongs to, like a round.
+------------------------------------------------------------------ */
+
+export function recapNoteKey(player, month) {
+  return `${String(player).toLowerCase()}|${month}`;
+}
+
+export function getRecapNotes() {
+  return read(KEYS.recapNotes, []);
+}
+
+export function getRecapNote(player, month) {
+  const key = recapNoteKey(player, month);
+  return getRecapNotes().find((n) => recapNoteKey(n.player, n.month) === key) || null;
+}
+
+/** Write one that arrived from the sheet, without pushing it back up. */
+export function replaceRecapNote(note) {
+  const key = recapNoteKey(note.player, note.month);
+  write(KEYS.recapNotes, getRecapNotes().filter((n) => recapNoteKey(n.player, n.month) !== key).concat([note]));
+}
+
+/** Save and queue for the sheet. Stamps `updatedAt` so pulls can compare. */
+export function saveRecapNote({ player, month, practice, rule }) {
+  const note = {
+    player,
+    month,
+    practice: String(practice || '').trim(),
+    rule: String(rule || '').trim(),
+    updatedAt: new Date().toISOString(),
+  };
+  replaceRecapNote(note);
+  const queue = unsyncedRecapNotes();
+  const key = recapNoteKey(player, month);
+  if (!queue.includes(key)) write(KEYS.recapNoteQueue, queue.concat([key]));
+  return note;
+}
+
+export function unsyncedRecapNotes() {
+  return read(KEYS.recapNoteQueue, []);
+}
+
+export function markRecapNoteSynced(key) {
+  write(KEYS.recapNoteQueue, unsyncedRecapNotes().filter((k) => k !== key));
+}
+
+/** The queued notes themselves, for the push. */
+export function pendingRecapNotes() {
+  const queue = new Set(unsyncedRecapNotes());
+  return getRecapNotes().filter((n) => queue.has(recapNoteKey(n.player, n.month)));
+}
+
+/** A social handle for the foot of a recap card. Blank, and so absent, by default. */
+export function recapHandle() {
+  return String(getPrefs().recapHandle || '').trim();
+}
+
 /* --- Backup / restore ------------------------------------------- */
 
 /** Everything, as one JSON blob — insurance until the Sheet backend lands. */
@@ -455,6 +520,7 @@ export function exportAll() {
     rounds: getRounds(),
     courses: getCourses(),
     teeTimes: getTeeTimes(),
+    recapNotes: getRecapNotes(),
     activeRound: getActiveRound(),
   };
 }
@@ -466,6 +532,7 @@ export function importAll(data) {
   // Absent in backups taken before the calendar existed, which is
   // fine — an old backup restores as a calendar with nothing in it.
   if (Array.isArray(data.teeTimes)) write(KEYS.teeTimes, data.teeTimes);
+  if (Array.isArray(data.recapNotes)) write(KEYS.recapNotes, data.recapNotes);
   if (data.player) write(KEYS.player, data.player);
   if (data.activeRound) write(KEYS.activeRound, data.activeRound);
 }

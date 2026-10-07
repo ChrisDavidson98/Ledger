@@ -8,7 +8,7 @@
 --------------------------------------------------------------- */
 
 /* Bumped whenever SHELL changes, so activate clears the old copy. */
-const CACHE = 'ledger-v35';
+const CACHE = 'ledger-v36';
 
 /*
  * Every module app.js imports, because they are static imports: one
@@ -38,6 +38,8 @@ const SHELL = [
   './src/charts.js',
   './src/repair.js',
   './src/recap.js',
+  './src/monthly.js',
+  './src/monthcards.js',
   './src/practice.js',
   './src/standings.js',
   './src/avatars.js',

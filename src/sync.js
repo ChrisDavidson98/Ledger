@@ -32,7 +32,7 @@ const LAST_PULL_KEY = 'ledger:last_pull';
  * changes, and raise MIN_CLIENT in Code.gs when an older shape stops
  * being safe to accept.
  */
-export const CLIENT_CONTRACT = 10;
+export const CLIENT_CONTRACT = 11;
 
 /* --- Config ------------------------------------------------------ */
 
@@ -731,6 +731,61 @@ export async function pullTeeTimes() {
   return { added, seen: (data.teeTimes || []).length };
 }
 
+/* --- Recap notes ---------------------------------------------------
+   A player's focus for next month. Tiny, and nothing depends on it,
+   so it rides along at the end of a sync and settles by `updated_at`
+   like a tee time.
+------------------------------------------------------------------ */
+
+export function flattenRecapNote(note) {
+  return {
+    player: note.player,
+    month: note.month,
+    practice_item: note.practice || '',
+    course_rule: note.rule || '',
+    updated_at: note.updatedAt,
+  };
+}
+
+export function rebuildRecapNote(row) {
+  // Sheets turns a typed "2026-09" into a date unless the column is
+  // text; a Date coming back is read as the month it falls in.
+  const month = row.month instanceof Date
+    ? `${row.month.getFullYear()}-${String(row.month.getMonth() + 1).padStart(2, '0')}`
+    : String(row.month || '').trim().slice(0, 7);
+  return {
+    player: String(row.player || '').trim(),
+    month,
+    practice: String(row.practice_item || ''),
+    rule: String(row.course_rule || ''),
+    updatedAt: String(row.updated_at || ''),
+  };
+}
+
+export async function pushRecapNotes() {
+  const notes = store.pendingRecapNotes();
+  if (!notes.length) return { pushed: 0 };
+  await post('pushRecapNotes', { notes: notes.map(flattenRecapNote) });
+  notes.forEach((n) => store.markRecapNoteSynced(store.recapNoteKey(n.player, n.month)));
+  return { pushed: notes.length };
+}
+
+/** Everyone's notes; one still waiting to go up here is left alone. */
+export async function pullRecapNotes() {
+  const data = await post('pullRecapNotes');
+  const pending = new Set(store.unsyncedRecapNotes());
+  let added = 0;
+  (data.notes || []).map(rebuildRecapNote).forEach((note) => {
+    if (!note.player || !/^\d{4}-\d{2}$/.test(note.month)) return;
+    if (pending.has(store.recapNoteKey(note.player, note.month))) return;
+    const mine = store.getRecapNote(note.player, note.month);
+    if (mine && new Date(mine.updatedAt) > new Date(note.updatedAt)) return;
+    if (!mine) added += 1;
+    store.replaceRecapNote(note);
+  });
+  return { added };
+}
+
 export async function pushCourses() {
   const courses = store.getCourses();
   if (!courses.length) return { pushed: 0 };
@@ -794,6 +849,16 @@ export async function syncAll() {
     result.teeTimes = (await pullTeeTimes()).added;
   } catch (err) {
     result.errors.push('Calendar failed: ' + err.message);
+  }
+
+  try {
+    await pushRecapNotes();
+    await pullRecapNotes();
+  } catch (err) {
+    // A deployment from before recap notes existed does not know the
+    // action. That is not a failed sync: the note stays queued here and
+    // goes up the first time the redeployed script is there to take it.
+    if (!/Unknown action/.test(err.message)) result.errors.push('Recap notes failed: ' + err.message);
   }
 
   // Refreshing the roster on every sync means somebody added while

@@ -109,7 +109,9 @@ import * as store from './storage.js';
 import * as sync from './sync.js';
 import { missingSeeds, cloneSeed } from './seed.js';
 import { EXTRACTION_PROMPT, parseCourseText, describeCourse } from './import.js';
-import { recapData, drawRecap, shareRecap } from './recap.js';
+import { recapData, drawRecap, shareRecap, shareImages } from './recap.js';
+import { buildRecap, recapMonths, monthName, nextMonth } from './monthly.js';
+import { drawRecapCards } from './monthcards.js';
 import { practiceFocus, bookedFocus, gameProfile } from './practice.js';
 import { standings } from './standings.js';
 import { AVATARS, isAvatar, avatarSvg, emojiOf, emojiAvatar } from './avatars.js';
@@ -182,6 +184,10 @@ const STATE = {
   teeZone: null,         // tee map side picked; null means the costliest
   repairPlan: null,      // previewed scorecard repair, before anything is written
   repairCourseId: null,
+  recapPlayer: null,     // whose month is on show; null means your own
+  recapMonth: null,      // 'YYYY-MM'; null means the latest month with a round
+  focusDraft: null,      // the two focus fields while they are being typed
+  monthlyBusy: false,
   rosterState: null,     // what the last roster read managed, shown at the gate
   setupPaste: '',        // a setup link pasted in by hand at the gate
   archive: null,
@@ -205,7 +211,7 @@ const STATE = {
  * arrived and once because it had; a four-character string at the
  * bottom of the sign-in screen answers it in a text message.
  */
-const BUILD = '2026-09-28a';
+const BUILD = '2026-10-07a';
 
 /* --- Benchmark ---------------------------------------------------
    Which standard strokes gained is measured against on this device.
@@ -377,7 +383,7 @@ const NAV_GROUPS = {
   home: ['home', 'setup', 'play', 'scorecard', 'summary'],
   calendar: ['calendar', 'teeTime', 'teeTimeEdit'],
   history: ['history', 'detail', 'settings', 'repair'],
-  stats: ['stats'],
+  stats: ['stats', 'monthly'],
   clubhouse: ['clubhouse', 'player'],
 };
 
@@ -1326,6 +1332,13 @@ function screenSettings() {
         <button class="chip ${store.missInline() ? '' : 'active'}" data-miss-inline="off">Behind a tap</button>
       </div>
       <p class="tiny">On tee shots and approaches. On screen shows the grid under the distance so a miss is one tap; behind a tap keeps the screen shorter. Either way it is optional.</p>
+    </div>
+
+    <div class="card">
+      <h2>Monthly recap</h2>
+      <label for="recapHandle">Handle on the cards</label>
+      <input type="text" id="recapHandle" maxlength="40" placeholder="@yourname" autocapitalize="off" autocorrect="off" value="${esc(store.recapHandle())}">
+      <p class="tiny">Printed at the foot of each monthly recap card, for when one gets posted. Leave it blank and the cards carry your name and the month only.</p>
     </div>
 
     <div class="card">
@@ -2565,6 +2578,13 @@ function renderStatsOverview(ctx) {
       </div>` : ''}
 
     ${renderTrendCard(trendSeries(allRounds, bench()), null, { choices: ['total', 'toPar'] })}
+
+    <div class="card">
+      <button class="row" data-action="goto-monthly" style="min-height:44px;padding:10px 0">
+        <div class="row-meta"><div class="rname" style="font-weight:500">Monthly recap</div><div class="rsub">The month as cards to save or post</div></div>
+        <div class="row-val" style="width:14px;text-align:right">&rsaquo;</div>
+      </button>
+    </div>
 
     ${parts.length ? `
       <div class="card">
@@ -4496,6 +4516,146 @@ function renderCombos(course) {
 
 /* --- Render ------------------------------------------------------ */
 
+/* --- Monthly recap -------------------------------------------------
+   One player's month as a set of cards. The screen shows the very
+   images the share sheet is handed, so what gets posted is what was
+   looked at. Nothing is stored but the focus the player types in.
+------------------------------------------------------------------ */
+
+/** The benchmark a recap is read against, worded for a card that travels. */
+function recapBench(player) {
+  const chosen = store.getBenchmark();
+  if (chosen === SELF_BENCHMARK) {
+    let level = selfLevel();
+    if (player !== STATE.player) {
+      // Somebody else's month is read against their own level, not the viewer's.
+      const game = gameProfile(store.getRounds().filter((r) => r.player === player), { window: 1000, minRounds: 1 });
+      level = game ? Math.round(Math.max(0, game.profile.overall) * 10) / 10 : 10;
+    }
+    const word = fmtHandicap(level);
+    return { key: level, label: `${word === 'scratch' ? word : `a ${word} handicap`} (own level)` };
+  }
+  const found = BENCHMARKS.find((b) => b.key === chosen);
+  const label = !found || found.handicap == null ? 'tour' : found.handicap === 0 ? 'scratch' : `a ${found.label}`;
+  return { key: bench(), label };
+}
+
+function monthlyContext() {
+  const all = store.getRounds();
+  const players = [...new Set(all.map((r) => r.player))].filter(Boolean).sort();
+  const player = players.includes(STATE.recapPlayer) ? STATE.recapPlayer : STATE.player;
+  const months = recapMonths(all, player);
+  const month = months.includes(STATE.recapMonth) ? STATE.recapMonth : months[0] || null;
+  return { all, players, player, months, month };
+}
+
+function monthlyRecap(ctx) {
+  const { key, label } = recapBench(ctx.player);
+  return buildRecap(ctx.all, ctx.player, ctx.month, key, {
+    benchLabel: label,
+    notes: store.getRecapNote(ctx.player, ctx.month),
+  });
+}
+
+/** What is in the two focus fields: the saved note until somebody types. */
+function focusDraft(ctx) {
+  const key = `${ctx.player}|${ctx.month}`;
+  if (!STATE.focusDraft || STATE.focusDraft.key !== key) {
+    const note = store.getRecapNote(ctx.player, ctx.month) || {};
+    STATE.focusDraft = { key, practice: note.practice || '', rule: note.rule || '' };
+  }
+  return STATE.focusDraft;
+}
+
+let monthlyCards = { key: null, cards: null, error: null };
+
+/**
+ * The drawn cards for a recap, drawn once and kept until the recap
+ * itself changes. Drawing is asynchronous (the fonts have to be in),
+ * so the first render shows blanks and this re-renders when it is done.
+ */
+function monthlyImages(recap) {
+  const key = JSON.stringify([recap, store.recapHandle()]);
+  if (monthlyCards.key === key) return monthlyCards;
+  (monthlyCards.cards || []).forEach((card) => URL.revokeObjectURL(card.url));
+  const entry = { key, cards: null, error: null };
+  monthlyCards = entry;
+  drawRecapCards(recap, { handle: store.recapHandle() })
+    .then((cards) => { entry.cards = cards.map((card) => ({ ...card, url: URL.createObjectURL(card.blob) })); })
+    .catch((err) => { entry.error = err.message; })
+    .finally(() => { if (monthlyCards === entry && STATE.screen === 'monthly') render(); });
+  return entry;
+}
+
+function screenMonthly() {
+  const ctx = monthlyContext();
+  const own = ctx.player === STATE.player;
+  const head = (sub) => `<header class="topbar">
+      <div class="brand">Monthly Recap</div>
+      <div class="sub">${esc(sub)}</div>
+    </header>`;
+  const pickers = ctx.players.length > 1 ? `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+      ${ctx.players.map((p) => `<button class="pill ${p === ctx.player ? 'active' : ''}" data-action="recap-player" data-player="${esc(p)}">${esc(p)}</button>`).join('')}
+    </div>` : '';
+  const back = '<button class="btn-ghost" data-action="stats-tab" data-tab="overview">&larr; Stats</button>';
+
+  if (!ctx.month) {
+    return `${head(ctx.player)}
+      ${pickers}
+      <div class="card"><div class="empty">${own ? 'Play a round and the month shows up here.' : `${esc(ctx.player)} has no rounds yet.`}</div></div>
+      ${back}`;
+  }
+
+  const recap = monthlyRecap(ctx);
+  const images = monthlyImages(recap);
+  const at = ctx.months.indexOf(ctx.month);
+  const older = ctx.months[at + 1];
+  const newer = ctx.months[at - 1];
+  const draft = own ? focusDraft(ctx) : null;
+  const nextName = monthName(nextMonth(ctx.month), { year: false });
+
+  return `${head(`${ctx.player} · vs ${recap.benchLabel}`)}
+    ${notices()}
+    ${pickers}
+    <div class="card">
+      <div class="cal-nav">
+        <button data-action="recap-month" data-month="${esc(older || '')}" aria-label="Earlier month" ${older ? '' : 'disabled'}>&lsaquo;</button>
+        <h2>${esc(recap.monthLabel)}</h2>
+        <button data-action="recap-month" data-month="${esc(newer || '')}" aria-label="Later month" ${newer ? '' : 'disabled'}>&rsaquo;</button>
+      </div>
+      <button class="btn-flag" data-action="share-monthly" ${images.cards && !STATE.monthlyBusy ? '' : 'disabled'}>${
+        images.cards ? `Share ${images.cards.length} Card${images.cards.length === 1 ? '' : 's'}` : 'Drawing…'}</button>
+      <p class="tiny">Each card is a 1080 &times; 1350 image. Sharing hands them all to the phone at once, to save to Photos or post.</p>
+      ${images.error ? `<div class="err-box">Could not draw the cards: ${esc(images.error)}</div>` : ''}
+    </div>
+
+    ${recap.cards.map((key, i) => {
+      const card = images.cards && images.cards[i];
+      const caption = recap.captions[key] || '';
+      return `<figure class="recap-card">
+        ${card
+          ? `<img src="${card.url}" width="1080" height="1350" alt="${esc(`${card.label}. ${caption}`)}">`
+          : '<div class="recap-blank" aria-hidden="true"></div>'}
+        <figcaption>${esc(caption)}</figcaption>
+      </figure>`;
+    }).join('')}
+
+    ${draft ? `
+      <div class="card">
+        <h2>Focus for ${esc(nextName)}</h2>
+        <label for="focusPractice">One thing to practise</label>
+        <input type="text" id="focusPractice" maxlength="90" placeholder="Lag putts from 30 feet" value="${esc(draft.practice)}">
+        <label for="focusRule">One rule on the course</label>
+        <input type="text" id="focusRule" maxlength="90" placeholder="Hybrid off the tee on the 7th" value="${esc(draft.rule)}">
+        <button class="btn-primary" style="margin-top:10px" data-action="save-focus">Save</button>
+        <p class="tiny">Adds a last card in your own words. Leave both blank and there is no card. It is saved to the sheet, so it follows you between phones.</p>
+      </div>` : ''}
+
+    <p class="tiny" style="text-align:center;margin:10px 0">Strokes gained vs ${esc(recap.benchLabel)} &middot; change it in Rounds &rsaquo; Settings</p>
+    ${back}`;
+}
+
 const SCREENS = {
   login: screenLogin,
   home: screenHome,
@@ -4510,6 +4670,7 @@ const SCREENS = {
   teeTime: screenTeeTime,
   teeTimeEdit: screenTeeTimeEdit,
   stats: screenStats,
+  monthly: screenMonthly,
   clubhouse: screenClubhouse,
   player: screenPlayer,
   courses: screenCourses,
@@ -4593,6 +4754,19 @@ function bindLiveInputs() {
   const ttNotes = document.getElementById('ttNotes');
   if (ttNotes) {
     ttNotes.oninput = (e) => { STATE.teeTimeDraft.notes = e.target.value; };
+  }
+
+  ['focusPractice', 'focusRule'].forEach((id) => {
+    const field = document.getElementById(id);
+    if (field && STATE.focusDraft) {
+      field.oninput = (e) => { STATE.focusDraft[id === 'focusRule' ? 'rule' : 'practice'] = e.target.value; };
+    }
+  });
+
+  // Applied on blur, not per keystroke: every character would redraw the cards.
+  const recapHandle = document.getElementById('recapHandle');
+  if (recapHandle) {
+    recapHandle.onchange = (e) => { store.setPref('recapHandle', e.target.value.trim()); };
   }
 
   const courseCity = document.getElementById('courseCity');
@@ -5299,6 +5473,46 @@ const ACTIONS = {
       notice: existing ? 'Tee time updated.' : 'Added to the diary.',
     });
     sync.syncInBackground(null, { force: true });
+  },
+
+  'goto-monthly': () => go('monthly'),
+  'recap-month': (el) => {
+    const month = el.getAttribute('data-month');
+    if (!month) return;
+    STATE.recapMonth = month;
+    render();
+  },
+  'recap-player': (el) => {
+    STATE.recapPlayer = el.getAttribute('data-player');
+    STATE.recapMonth = null;
+    render();
+  },
+  'save-focus': () => {
+    const ctx = monthlyContext();
+    if (ctx.player !== STATE.player || !ctx.month) return;
+    const draft = focusDraft(ctx);
+    store.saveRecapNote({ player: ctx.player, month: ctx.month, practice: draft.practice, rule: draft.rule });
+    STATE.focusDraft = null;
+    STATE.notice = 'Focus saved.';
+    render();
+    sync.syncInBackground(null, { force: true });
+  },
+  'share-monthly': async () => {
+    // Only ever with the cards already drawn: a share sheet has to open
+    // straight off the tap, and waiting on a canvas first loses that.
+    const cards = monthlyCards.cards;
+    if (!cards || STATE.monthlyBusy) return;
+    const ctx = monthlyContext();
+    STATE.monthlyBusy = true;
+    try {
+      const outcome = await shareImages(cards, `${ctx.player} · ${monthName(ctx.month)}`);
+      STATE.notice = outcome === 'saved' ? `${cards.length} recap images saved.` : '';
+    } catch (err) {
+      STATE.notice = 'Could not share the recap: ' + err.message;
+    } finally {
+      STATE.monthlyBusy = false;
+      render();
+    }
   },
 
   'share-recap': async (el) => {

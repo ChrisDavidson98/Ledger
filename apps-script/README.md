@@ -6,8 +6,8 @@ else just pastes the same URL and secret into the app's Settings screen.
 ## 1. Make the spreadsheet
 
 Create a new Google Sheet. Name it something like **Ledger Data**. Leave the
-default tab alone — the script creates `rounds`, `shots`, `courses`, `players` and
-`tee_times` itself.
+default tab alone — the script creates `rounds`, `shots`, `courses`, `players`,
+`tee_times` and `recap_notes` itself.
 
 ## 2. Add the script
 
